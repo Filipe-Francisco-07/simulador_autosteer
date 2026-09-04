@@ -40,6 +40,14 @@ function acharCompilador() {
   return null;
 }
 
+// O g++ do MinGW linka a libstdc++ dinamicamente: sem as DLLs dele no PATH o
+// executavel morre calado (o servidor so ve o processo sumir). Linkando estatico
+// o firmware_sim.exe roda sozinho, que e o que o resto do simulador espera.
+function extrasDeLink(c) {
+  const ehGpp = /g\+\+|clang\+\+/.test(c.cmd) && c.args.length === 0;
+  return ehGpp ? ['-static-libstdc++', '-static-libgcc'] : [];
+}
+
 const comp = acharCompilador();
 if (!comp) {
   console.error('\nNenhum compilador C++ encontrado.');
@@ -59,6 +67,7 @@ const args = [
   '-DFIRMWARE_MAIN="' + MAIN.replace(/\\/g, '/') + '"',
   '-DFIRMWARE_NOME="autosteer_can_esp32"',
   path.join(__dirname, 'sim', 'harness.cpp'),
+  ...extrasDeLink(comp),
   '-o', saida,
 ];
 

@@ -101,8 +101,8 @@ static void publicarEstado() {
            travaSeguranca ? "true" : "false",
            keyaVisto ? "true" : "false",
            motorDesabilitou ? "true" : "false",
-           (int)encoderAcumulado,
-           encoderIniciado ? "true" : "false",
+           (int)encoder.acumulado,
+           encoder.iniciado ? "true" : "false",
            (double)correnteMedia,
            (unsigned)ciclosSobrecarga,
            (unsigned)(ordem.status & 0x01),
@@ -126,8 +126,14 @@ static void reiniciar() {
     tUltimoPgn = tUltimoHb = tUltimoEnvio = tUltimoCmdCan = 0;
     hb = {0, 0, 0, 0};
     correnteMedia = 0.0f; ciclosSobrecarga = 0;
-    encoderAcumulado = 0; encoderAnterior = 0; encoderIniciado = false;
+    encoder = {0, 0, false};
     encoderCentro = 0; anguloAtualX100 = 0; pwmSaida = 0;
+
+    // A ancora do offset precisa rearmar: sem isto o "R" nao repete o boot de
+    // verdade — o primeiro PGN 252 depois do reinicio nao ancoraria mais nada.
+    offsetAncorado = false;
+    contaPgn254 = 0; ultimoStatus254 = 0; cpdEmUso = 100;
+    serPos = 0; serFaltam = 0;
 
     setup();
     drenarSaidas();
