@@ -1,0 +1,12 @@
+# dependencias
+node_modules/
+
+# o firmware compilado para rodar no PC (gerado por `npm run build`)
+sim/firmware_sim.exe
+sim/*.pdb
+sim/*.obj
+
+# build do PlatformIO do firmware de bancada
+firmware_bancada/.pio/
+
+*.log

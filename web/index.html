@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Simulador de tradução — autosteer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --chapa:#DEDFDA; --chapa-fundo:#CBCDC7; --modulo:#F2F2EF; --linha:#B6B8B1;
+  --tinta:#1B1E20; --tinta-fraca:#5E6360;
+  --frio:#26597D; --frio-claro:#DCE7EF;
+  --quente:#A96A1E; --quente-claro:#F2E6D4;
+  --alerta:#B93225; --alerta-claro:#F6DEDA;
+  --ativo:#4A7C41; --ativo-claro:#E0EBDC;
+  --terra:#8C7A5E;
+  --mono:'IBM Plex Mono',ui-monospace,monospace;
+  --cond:'IBM Plex Sans Condensed',system-ui,sans-serif;
+  --sans:'IBM Plex Sans',system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--chapa-fundo);color:var(--tinta);font-family:var(--sans);font-size:13px;
+  overflow-x:hidden}
+.painel{max-width:1680px;margin:0 auto;padding:10px 14px 20px;display:flex;flex-direction:column;gap:10px}
+
+header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;padding-bottom:8px;border-bottom:2px solid var(--linha)}
+h1{font-family:var(--cond);font-size:18px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;margin:0}
+.sub{color:var(--tinta-fraca);font-size:12px}
+.sub b{font-family:var(--mono);font-weight:500;color:var(--tinta)}
+.acoes{margin-left:auto;display:flex;gap:6px}
+
+.modulo{background:var(--modulo);border:1px solid var(--linha);border-radius:2px}
+.modulo>h2{font-family:var(--cond);font-size:11px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;
+  margin:0;padding:6px 11px;border-bottom:1px solid var(--linha);display:flex;align-items:center;gap:8px}
+.modulo>h2 .lado{font-family:var(--sans);font-size:10px;font-weight:500;letter-spacing:.03em;
+  text-transform:none;color:var(--tinta-fraca);margin-left:auto}
+.corpo{padding:11px}
+
+/* ---------- cabine: mapa + instrumentos ---------- */
+.cabine{display:grid;grid-template-columns:1fr 320px;gap:10px;align-items:stretch}
+.mapa-caixa{position:relative;background:#E7E4DA;border:1px solid var(--linha);border-radius:2px;overflow:hidden;
+  min-height:460px}
+#mapa{display:block;width:100%;height:100%}
+.mapa-info{position:absolute;left:10px;top:10px;display:flex;flex-direction:column;gap:4px;pointer-events:none}
+.selo{font-family:var(--mono);font-size:11px;background:rgba(242,242,239,.92);border:1px solid var(--linha);
+  border-radius:2px;padding:3px 7px;align-self:flex-start}
+.selo.erro{background:var(--alerta-claro);border-color:var(--alerta);color:var(--alerta);font-weight:600}
+.mapa-acoes{position:absolute;right:10px;top:10px;display:flex;gap:6px}
+
+.instrumentos{display:flex;flex-direction:column;gap:10px}
+.volante-caixa{background:var(--modulo);border:1px solid var(--linha);border-radius:2px;padding:10px;
+  display:flex;flex-direction:column;align-items:center;gap:6px}
+.volante-caixa .quem{font-family:var(--cond);font-size:10px;font-weight:700;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--tinta-fraca)}
+.volante-caixa .quem.piloto{color:var(--ativo)}
+.leituras{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--linha);border:1px solid var(--linha)}
+.leitura{background:var(--modulo);padding:7px 9px}
+.leitura .r{font-family:var(--cond);font-size:9.5px;font-weight:600;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--tinta-fraca)}
+.leitura .n{font-family:var(--cond);font-size:23px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.05}
+.leitura .n small{font-size:11px;font-weight:500;color:var(--tinta-fraca)}
+.leitura.frio .n{color:var(--frio)} .leitura.quente .n{color:var(--quente)}
+.leitura.ruim .n{color:var(--alerta)}
+/* marcha a re: precisa saltar aos olhos, senao o operador aperta W e o trator
+   sai para tras sem ele entender por que */
+.leitura.re{background:var(--quente-claro)}
+.leitura.re .n{color:var(--quente)}
+
+/* ---------- faixa de modo ---------- */
+.faixa-modo .modo-linha{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:9px 11px}
+.modo-quem{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.modo-rotulo{font-family:var(--cond);font-size:10px;font-weight:700;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--tinta-fraca)}
+.modo-quem strong{font-family:var(--cond);font-size:15px}
+.modo-nota{font-size:11px;color:var(--tinta-fraca)}
+.modo-acoes{margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.modo-acoes select{font-family:var(--mono);font-size:11.5px;padding:5px 6px;border:1px solid var(--linha);
+  border-radius:2px;background:#fff;color:var(--tinta)}
+.faixa-modo.naplaca{border-color:var(--quente);border-width:2px}
+/* malha fechando com a placa: e o arranjo mais proximo do campo que existe
+   sobre a mesa, entao merece destaque proprio */
+.faixa-modo.bancada{border-color:var(--ativo)}
+.faixa-modo.bancada .modo-quem strong{color:var(--ativo)}
+.faixa-modo.naplaca .modo-quem strong{color:var(--quente)}
+.aviso-placa{border-top:1px solid var(--linha);background:var(--quente-claro);font-size:11.5px;line-height:1.45}
+.aviso-muda{border-top:1px solid var(--linha);background:var(--alerta-claro);color:var(--alerta);
+  font-size:11.5px;line-height:1.45}
+.aviso-tentou{border-top:1px solid var(--linha);background:var(--alerta);color:#fff;
+  font-size:12.5px;line-height:1.5;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.aviso-tentou button{background:#fff;border-color:#fff;color:var(--alerta);margin-left:auto}
+.texto-placa{border-top:1px solid var(--linha);font-family:var(--mono);font-size:11px;line-height:1.5;
+  max-height:88px;overflow-y:auto;color:var(--tinta-fraca);background:#fff}
+.teclas{display:grid;grid-template-columns:auto 1fr;gap:3px 8px;font-size:11px;align-items:center}
+.teclas kbd{font-family:var(--mono);font-size:10px;background:#fff;border:1px solid var(--linha);
+  border-bottom-width:2px;border-radius:3px;padding:1px 5px;justify-self:start}
+.teclas span{color:var(--tinta-fraca)}
+
+.bandeiras{display:flex;flex-wrap:wrap;gap:4px}
+.bandeira{font-family:var(--mono);font-size:10.5px;padding:3px 7px;border-radius:2px;
+  background:var(--chapa);color:var(--tinta-fraca);border:1px solid var(--linha)}
+.bandeira.on{background:var(--ativo-claro);color:var(--ativo);border-color:var(--ativo);font-weight:600}
+.bandeira.perigo{background:var(--alerta-claro);color:var(--alerta);border-color:var(--alerta);font-weight:600}
+/* o que a placa nao reporta: melhor apagado do que mentindo */
+.bandeira.indisponivel{opacity:.35;text-decoration:line-through}
+
+/* ---------- bancada tecnica ---------- */
+.bancada{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;align-items:start}
+.modulo.frio>h2{background:var(--frio-claro);color:var(--frio)}
+.modulo.quente>h2{background:var(--quente-claro);color:var(--quente)}
+
+.campo{margin-bottom:9px}
+.campo:last-child{margin-bottom:0}
+.campo>label{display:flex;justify-content:space-between;align-items:baseline;gap:8px;
+  font-size:11px;font-weight:500;margin-bottom:3px}
+.campo>label .v{font-family:var(--mono);font-size:12px}
+input[type=range]{width:100%;margin:0;accent-color:var(--frio);height:18px}
+.quente input[type=range]{accent-color:var(--quente)}
+input[type=number]{font-family:var(--mono);font-size:12px;width:100%;padding:3px 5px;
+  border:1px solid var(--linha);border-radius:2px;background:#fff;color:var(--tinta)}
+.grade{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+button{font-family:var(--cond);font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;
+  padding:6px 11px;border:1px solid var(--linha);border-radius:2px;background:var(--modulo);
+  color:var(--tinta);cursor:pointer}
+button:hover{background:#fff}
+button:focus-visible{outline:2px solid var(--frio);outline-offset:1px}
+button.largo{width:100%}
+button.primario{background:var(--frio);border-color:var(--frio);color:#fff}
+button.primario.ligado{background:var(--ativo);border-color:var(--ativo)}
+
+.chave{display:flex;align-items:center;gap:8px;padding:5px 7px;margin-bottom:4px;
+  border:1px solid var(--linha);border-radius:2px;background:#fff;cursor:pointer;user-select:none}
+.chave:last-of-type{margin-bottom:0}
+.chave input{position:absolute;opacity:0;pointer-events:none}
+.chave .luz{width:10px;height:10px;border-radius:50%;border:1px solid var(--linha);background:var(--chapa);flex:none}
+.chave input:checked~.luz{background:var(--alerta);border-color:var(--alerta);box-shadow:0 0 0 2px var(--alerta-claro)}
+.chave .txt{font-size:11.5px;line-height:1.25}
+.chave .txt small{display:block;color:var(--tinta-fraca);font-size:10px}
+.chave:has(input:checked){background:var(--alerta-claro);border-color:var(--alerta)}
+/* chaves de configuracao do AOG: ligadas sao normais, nao alarme */
+.chave.config input:checked~.luz{background:var(--ativo);border-color:var(--ativo);box-shadow:0 0 0 2px var(--ativo-claro)}
+.chave.config:has(input:checked){background:var(--ativo-claro);border-color:var(--ativo)}
+
+.registro{height:120px;overflow-y:auto;font-family:var(--mono);font-size:11px;line-height:1.55;
+  background:#fff;border:1px solid var(--linha);border-radius:2px;padding:5px 7px}
+.registro div{display:flex;gap:8px}
+.registro .t{color:var(--tinta-fraca);flex:none}
+.registro .ev{color:var(--alerta);font-weight:600}
+.dica{font-size:11px;color:var(--tinta-fraca);line-height:1.4;margin:8px 0 0;padding-top:7px;
+  border-top:1px dashed var(--linha)}
+.desligado{opacity:.45}
+@media (max-width:1180px){.cabine{grid-template-columns:1fr}.bancada{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="painel">
+
+<header>
+  <h1>Simulador de tradução</h1>
+  <span class="sub">firmware <b>autosteer_can_esp32</b> · ligação <b id="conexao">conectando</b></span>
+  <div class="acoes">
+    <button id="btnReset">Reiniciar tudo</button>
+  </div>
+</header>
+
+<!-- ====================== ONDE RODA O FIRMWARE ====================== -->
+<section class="modulo faixa-modo">
+  <div class="corpo modo-linha">
+    <div class="modo-quem">
+      <span class="modo-rotulo">Firmware rodando em</span>
+      <strong id="modoAtual">simulado no PC</strong>
+      <span class="modo-nota" id="modoNota">a malha fecha inteira, com o motor Keya de mentira</span>
+    </div>
+    <div class="modo-acoes">
+      <select id="portas" aria-label="Porta da placa"><option value="">procurando portas…</option></select>
+      <select id="baud" aria-label="Velocidade da serial">
+        <option value="38400" selected>38400 baud</option>
+        <option value="115200">115200 baud</option>
+      </select>
+      <button id="btnProcurar">Procurar</button>
+      <button id="btnConectar" class="primario">Usar a placa</button>
+      <button id="btnReiniciarPlaca" hidden>Reiniciar a placa</button>
+      <button id="btnDesconectar" hidden>Voltar ao simulado</button>
+    </div>
+  </div>
+  <div class="corpo aviso-tentou" id="avisoTentou" hidden>
+    <strong>Você pediu o piloto, mas está usando a placa — aqui ele não esterça.</strong>
+    O motor não está ligada nela, então não há o que girar.
+    <button id="btnVoltarSimulado">Voltar ao simulado e usar o piloto</button>
+  </div>
+  <div class="corpo aviso-muda" id="avisoMuda" hidden>
+    <strong>A porta abriu, mas nada chega dela.</strong>
+    Nenhum PGN em 3 segundos. Provavelmente é outra porta COM ou o baud está
+    errado — os CH340 do projeto não têm número de série e trocam de número
+    quando mudam de tomada USB. O firmware fala a <b>38400</b>.
+  </div>
+  <div class="corpo aviso-placa" id="avisoPlaca" hidden>
+    <strong>Aqui o piloto não esterça, e isso é o arranjo — não defeito.</strong>
+    O motor Keya está no barramento CAN, que o PC não alcança: a placa não tem
+    ângulo para reportar nem motor para comandar. Dirija com <b>A</b> e <b>D</b>
+    e compare — <b>roda de verdade</b> mostra onde ela está, <b>firmware acha</b>
+    fica em zero, porque a placa não sabe. O que se testa neste modo é a camada
+    AgOpenGPS ↔ módulo: se ela responde o PGN 253, em que cadência e se aguenta
+    o baud. Para a malha fechar, volte ao <b>simulado</b>.
+  </div>
+  <div class="corpo texto-placa" id="textoPlaca" hidden></div>
+</section>
+
+<!-- ====================== CABINE ====================== -->
+<div class="cabine">
+  <div class="mapa-caixa">
+    <canvas id="mapa"></canvas>
+    <div class="mapa-info">
+      <span class="selo" id="seloPos">0 m · rumo 0°</span>
+      <span class="selo" id="seloXte">sem linha AB — ande um pouco e marque A, depois B</span>
+      <span class="selo erro" id="seloRe" hidden>o AOG está com o rumo invertido na ré</span>
+    </div>
+    <div class="mapa-acoes">
+      <button id="btnA">Marcar A</button>
+      <button id="btnB">Marcar B</button>
+      <button id="btnRastro">Limpar rastro</button>
+    </div>
+  </div>
+
+  <div class="instrumentos">
+    <div class="volante-caixa">
+      <svg id="volante" width="150" height="150" viewBox="-60 -60 120 120" aria-label="Volante">
+        <g id="giroVolante">
+          <circle r="46" fill="none" stroke="#2A2D30" stroke-width="9"/>
+          <circle r="46" fill="none" stroke="#4A4E52" stroke-width="3"/>
+          <path d="M0 0 L0 -46 M0 0 L-40 23 M0 0 L40 23" stroke="#2A2D30" stroke-width="8" stroke-linecap="round"/>
+          <circle r="12" fill="#2A2D30"/>
+          <circle r="4" cy="-46" fill="#B93225"/>
+        </g>
+      </svg>
+      <span class="quem" id="quemDirige">você no volante</span>
+    </div>
+
+    <div class="leituras">
+      <div class="leitura"><div class="r">Velocidade</div><div class="n" id="mVel">0,0<small>km/h</small></div></div>
+      <div class="leitura" id="boxMarcha"><div class="r">Marcha</div><div class="n" id="mMarcha">N</div></div>
+      <div class="leitura frio"><div class="r">Firmware acha</div><div class="n" id="mFw">0,0<small>°</small></div></div>
+      <div class="leitura quente"><div class="r">Roda de verdade</div><div class="n" id="mRoda">0,0<small>°</small></div></div>
+      <div class="leitura" id="boxDiv"><div class="r">Diferença</div><div class="n" id="mDiv">0,0<small>°</small></div></div>
+      <div class="leitura"><div class="r">Fora da passada</div><div class="n" id="mXte">--</div></div>
+    </div>
+
+    <div class="modulo"><div class="corpo" style="padding:9px 11px">
+      <div class="bandeiras">
+        <span class="bandeira" id="bLigado">piloto</span>
+        <span class="bandeira" id="bTrava">trava</span>
+        <span class="bandeira" id="bKeya">motor</span>
+        <span class="bandeira" id="bRe">ré</span>
+      </div>
+      <div class="teclas" style="margin-top:9px">
+        <kbd>W</kbd><span>acelerar</span>
+        <kbd>S</kbd><span>ré (em marcha R)</span>
+        <kbd>espaço</kbd><span>freio</span>
+        <kbd>A</kbd> <kbd>D</kbd><span>girar o volante na mão</span>
+        <kbd>shift</kbd> <kbd>ctrl</kbd><span>marcha acima / abaixo</span>
+        <kbd>enter</kbd><span>engatar o piloto</span>
+      </div>
+    </div></div>
+  </div>
+</div>
+
+<!-- ====================== BANCADA ====================== -->
+<div class="bancada">
+
+  <section class="modulo frio">
+    <h2>AgOpenGPS <span class="lado">a configuração da cabine</span></h2>
+    <div class="corpo" id="blocoAog">
+      <button id="btnPiloto" class="primario largo" style="margin-bottom:10px">Engatar piloto</button>
+
+      <div class="grade">
+        <div class="campo"><label>Ganho P</label><input type="number" id="ganhoP" value="40" min="0" max="255"></div>
+        <div class="campo"><label>Contagens/grau</label><input type="number" id="cpd" value="100" min="1" max="255"></div>
+        <div class="campo"><label>PWM mínimo</label><input type="number" id="pwmMin" value="25" min="0" max="255"></div>
+        <div class="campo"><label>PWM alto</label><input type="number" id="pwmAlto" value="180" min="0" max="255"></div>
+      </div>
+      <button id="btnZero" class="largo" style="margin-bottom:9px">Zerar rodas (Was Zero)</button>
+
+      <div class="campo">
+        <label>Largura de trabalho <span class="v" id="vLargura">4,0 m</span></label>
+        <input type="range" id="largura" min="1" max="12" step="0.5" value="4">
+      </div>
+
+      <label class="chave config">
+        <input type="checkbox" id="reverseOn" checked><span class="luz"></span>
+        <span class="txt">Detectar ré (Reverse On)<small>Desligue para reproduzir o chamado 7: o rumo trava apontando para frente.</small></span>
+      </label>
+      <label class="chave config">
+        <input type="checkbox" id="steerInReverse"><span class="luz"></span>
+        <span class="txt">Esterçar de ré<small>Desligado, o piloto solta sozinho ao detectar ré.</small></span>
+      </label>
+      <label class="chave">
+        <input type="checkbox" id="aogMudo"><span class="luz"></span>
+        <span class="txt">Cortar o cabo do AOG<small>Para de enviar PGN 254. O cão de guarda deve soltar em 1 s.</small></span>
+      </label>
+    </div>
+  </section>
+
+  <section class="modulo">
+    <h2>Firmware <span class="lado">o tradutor, rodando de verdade</span></h2>
+    <div class="corpo">
+      <div class="leituras" style="margin-bottom:9px">
+        <div class="leitura"><div class="r">PWM aplicado</div><div class="n" id="mPwm">0</div></div>
+        <div class="leitura"><div class="r">Corrente média</div><div class="n" id="mCorrente">0,0<small>A</small></div></div>
+        <div class="leitura"><div class="r">Encoder</div><div class="n" id="mEncoder">0</div></div>
+        <div class="leitura"><div class="r">Ângulo pedido</div><div class="n" id="mAlvo">0,0<small>°</small></div></div>
+      </div>
+      <div class="registro" id="eventos"></div>
+      <p class="dica">Estes números vêm das variáveis internas do firmware compilado, não de uma cópia da lógica.</p>
+    </div>
+  </section>
+
+  <section class="modulo quente">
+    <h2>Motor Keya <span class="lado">você é o hardware</span></h2>
+    <div class="corpo">
+      <label class="chave">
+        <input type="checkbox" id="mao"><span class="luz"></span>
+        <span class="txt">Mão no volante<small>Sobe a corrente. O módulo deve soltar e continuar solto.</small></span>
+      </label>
+      <label class="chave">
+        <input type="checkbox" id="travado"><span class="luz"></span>
+        <span class="txt">Motor travado<small>Corrente alta, eixo parado.</small></span>
+      </label>
+      <label class="chave">
+        <input type="checkbox" id="canMudo"><span class="luz"></span>
+        <span class="txt">Cortar o barramento CAN<small>Sem heartbeat. Deve soltar em 1 s.</small></span>
+      </label>
+      <label class="chave">
+        <input type="checkbox" id="sentidoInvertido"><span class="luz"></span>
+        <span class="txt">Motor montado ao contrário<small>Discorda do SENTIDO do firmware: a malha diverge.</small></span>
+      </label>
+
+      <div class="campo" style="margin-top:10px">
+        <label>Escorregamento do orbitrol <span class="v" id="vEscorrega">0%</span></label>
+        <input type="range" id="escorrega" min="0" max="90" step="1" value="0">
+      </div>
+      <div class="campo">
+        <label>Contagens por grau reais <span class="v" id="vCpdReal">100</span></label>
+        <input type="range" id="cpdReal" min="40" max="200" step="1" value="100">
+      </div>
+      <div class="campo">
+        <label>Velocidade do motor <span class="v" id="vVelMotor">4,0 v/s</span></label>
+        <input type="range" id="velMotor" min="0.5" max="10" step="0.25" value="4">
+      </div>
+      <div class="campo">
+        <label>Batente das rodas <span class="v" id="vBatente">40°</span></label>
+        <input type="range" id="batente" min="10" max="55" step="1" value="40">
+      </div>
+      <p class="dica">A velocidade do motor é <b>estimada</b>, não medida: é o número que decide se o piloto corrige antes do trator sair da linha. Cronometrar o motor real batente a batente resolve isso.</p>
+      <p class="dica">O escorregamento é a pergunta do chamado: o erro dele <b>acumula</b>, não estabiliza. Se crescer sem voltar, o encoder sozinho não dá conta e o WAS se justifica.</p>
+    </div>
+  </section>
+</div>
+
+</div>
+<script src="app.js"></script>
+</body>
+</html>

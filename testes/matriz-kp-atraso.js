@@ -1,0 +1,45 @@
+// Quanto atraso a malha aguenta, para cada ganho?
+//
+// A pergunta nasceu da bancada: com a placa no meio, o heartbeat e o comando
+// atravessam a USB duas vezes (~25 ms, com picos de 50) e o trator passou a
+// oscilar. Antes de culpar o firmware, vale medir a fronteira — e o numero
+// serve para o campo: diz quanta folga o Kp escolhido deixa.
+const { Piloto } = require('./piloto.js');
+
+const GANHOS = [20, 40, 126];    // 126 e o que estava configurado em 30/08
+const ATRASOS = [0, 40, 75];
+
+(async () => {
+  const p = new Piloto();
+  await p.pronto;
+  await p.usarSimulado();
+
+  console.log('erro medio nos ultimos 10 s de cada combinacao (metros)\n');
+  process.stdout.write('  Kp \ atraso ');
+  for (const a of ATRASOS) process.stdout.write(String(a + ' ms').padStart(9));
+  console.log('\n  ' + '-'.repeat(12 + ATRASOS.length * 9));
+
+  for (const kp of GANHOS) {
+    process.stdout.write('  ' + String(kp).padStart(10) + '  ');
+    for (const atraso of ATRASOS) {
+      await p.zerar();
+      p.envia('ajustes', { ganhoP: kp, contagensPorGrau: 100, pwmMinimo: 25, pwmAlto: 180 });
+      p.envia('atrasoMotor', atraso);
+      await p.espera(400);
+      await p.prepararLinha();
+      p.engatar();
+      await p.espera(15000);
+
+      const amostras = [];
+      for (let i = 0; i < 8; i++) { await p.espera(500); const a = p.amostra(); if (a) amostras.push(Math.abs(a.xte)); }
+      p.parar();
+      const media = amostras.reduce((s, v) => s + v, 0) / (amostras.length || 1);
+      const marca = media < 0.2 ? ' ' : media < 0.5 ? '~' : '!';
+      process.stdout.write((media.toFixed(2) + marca).padStart(9));
+    }
+    console.log('');
+  }
+  console.log('\n  espaco = firme (< 20 cm)   ~ = oscila pouco   ! = nao estabiliza');
+  p.fechar();
+  process.exit(0);
+})();

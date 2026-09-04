@@ -1,0 +1,528 @@
+// Servidor do simulador.
+//
+// Amarra quatro coisas num relogio so:
+//   1. o FIRMWARE REAL, rodando como processo (sim/firmware_sim.exe)
+//   2. o AgOpenGPS simulado — linha AB, erro lateral e o PGN 254 de cada ciclo
+//   3. o motor Keya simulado — a fisica do motor e da coluna de direcao
+//   4. o TRATOR — onde ele esta, para onde aponta, marcha e velocidade
+//
+// A malha fecha de verdade: a linha AB diz o angulo desejado, o firmware
+// traduz para o motor, o motor gira as rodas, o trator anda e sai um erro
+// lateral novo. E o mesmo ciclo do campo, com o firmware de verdade no meio.
+
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const { spawn } = require('child_process');
+const { WebSocketServer } = require('ws');
+const { MotorKeya } = require('./motor.js');
+const { Trator, LinhaAB, MARCHAS } = require('./trator.js');
+const { Placa, listarPortas, BAUD_PADRAO } = require('./placa.js');
+const { Espelho, roteiro, roteiroEstresse } = require('./espelho.js');
+const aog = require('./aog.js');
+
+const PORTA = 3000;
+const PASSO_MS = 20;           // cadencia real do heartbeat do Keya
+const EXE = path.join(__dirname, '..', 'sim', 'firmware_sim.exe');
+
+if (!fs.existsSync(EXE)) {
+  console.error('\nFirmware nao compilado. Rode:  npm run build\n');
+  process.exit(1);
+}
+
+// ------------------------------------------------------------- estado global
+const motor = new MotorKeya();
+const trator = new Trator();
+const linha = new LinhaAB();
+
+let aogLigado = true;          // o AOG esta mandando PGN? (desligar = cabo caido)
+let pilotoPedido = false;      // o operador apertou engatar
+let comandoAog = { velocidadeKmh: 0, engatar: false, anguloAlvoGraus: 0, xte: 0 };
+let ajustesAog = { ganhoP: 40, pwmAlto: 180, pwmBaixo: 30, pwmMinimo: 25,
+                   contagensPorGrau: 100, offsetDirecao: 0, ackerman: 100 };
+let motorRespondendo = true;   // o Keya esta mandando heartbeat?
+let estadoFirmware = {};
+let pwmRealDaPlaca = 0;      // vem do comando CAN ecoado (so no firmware de bancada)
+let ultimoPgn253 = null;
+let contadores = { pgn253: 0, canCmd: 0 };
+
+// ---- de onde vem o firmware -----------------------------------------------
+// 'simulado' = o main.cpp compilado rodando aqui, com o motor Keya de mentira
+//              e a malha fechando inteira.
+// 'placa'    = o ESP32 de verdade na USB. Testa a serial, o baud e o tempo
+//              real, mas SO a camada AOG<->modulo: o motor mora no barramento
+//              CAN, que o PC nao ve.
+let modo = 'simulado';
+let placaEstado = { estado: 'desligada', caminho: null, baud: BAUD_PADRAO, erro: null };
+let textoDaPlaca = [];
+// A porta abrir nao quer dizer que o modulo esta do outro lado: os CH340 do
+// projeto nao tem numero de serie e trocam de COM ao mudar de tomada. Se em
+// alguns segundos nao chegar nenhum PGN, e porta errada ou baud errado — e o
+// operador precisa saber disso, nao ficar olhando uma tela parada.
+let ultimoPgnDaPlaca = 0;
+let placaMuda = false;
+
+const placa = new Placa({
+  aoReceberPgn: (quadro) => {
+    espelho.registrar('placa', quadro);
+    const p = aog.parseFromAutoSteer(quadro);
+    ultimoPgnDaPlaca = Date.now();
+    if (placaMuda) {
+      placaMuda = false;
+      transmitir({ t: 'placa', ...placaEstado, muda: false });
+    }
+    if (p) { ultimoPgn253 = p; contadores.pgn253++; }
+    // Sem acesso as variaveis internas, o estado vem do que a placa reporta.
+    if (p) {
+      // SO o que a placa realmente diz. Antes eu carregava o resto do estado
+      // do modo simulado junto (corrente, encoder, trava), e a tela mostrava
+      // numero velho como se fosse leitura da placa — mentira que atrapalha
+      // justamente quem esta testando.
+      estadoFirmware = {
+        ...estadoFirmware,
+        anguloAtualX100: p.anguloX100,
+        // na bancada o PWM verdadeiro vem do comando CAN; sem ele, o byte de
+        // diagnostico e o que ha — e ele vira CPD quando o motor esta parado
+        pwmSaida: placa.temBancada ? pwmRealDaPlaca : p.pwm,
+        byteDiagnostico: p.diagnostico,
+        chaves: p.chaves,
+        deQuem: 'placa',
+      };
+    }
+    transmitir({ t: 'quadro', via: 'serial', hex: quadro.toString('hex').toUpperCase(), decodificado: p });
+  },
+  aoTexto: (t) => {
+    textoDaPlaca.push(t);
+    if (textoDaPlaca.length > 40) textoDaPlaca.shift();
+    transmitir({ t: 'textoPlaca', texto: t });
+  },
+  // O firmware de bancada ecoa o comando que mandaria ao motor. Com ele o
+  // motor simulado obedece o comando EXATO, em vez de deduzir o sentido pelo
+  // modulo do PWM que o PGN 253 reporta.
+  aoComandoCan: (dados) => {
+    motor.receberComando(0, dados.toString('hex'));
+    contadores.canCmd++;
+    // O comando de velocidade diz o PWM de verdade, com sinal — o campo do
+    // PGN 253 vira o CPD quando o PWM e zero, entao nao serve sozinho.
+    const vel = aog.velocidadeDoComandoKeya(dados);
+    if (vel !== null) {
+      pwmRealDaPlaca = Math.round(vel * 255 / 998) * -1;   // desfaz o SENTIDO=-1
+      estadoFirmware = { ...estadoFirmware, pwmSaida: pwmRealDaPlaca, deQuem: 'placa' };
+    }
+    transmitir({ t: 'quadro', via: 'can', hex: dados.toString('hex').toUpperCase() });
+  },
+  aoEstado: (estado, erro) => {
+    placaEstado = { ...placaEstado, estado, erro: erro || null,
+                    caminho: placa.caminho, baud: placa.baud };
+    transmitir({ t: 'placa', ...placaEstado });
+  },
+});
+
+// Volante na mao do operador (teclas A e D)
+let estercandoEsq = false, estercandoDir = false;
+
+// Atraso artificial no caminho do motor.
+//
+// Serve para responder uma pergunta concreta: quanto atraso a malha aguenta
+// antes de comecar a oscilar? Na bancada com a placa, o heartbeat e o comando
+// atravessam a USB duas vezes (~25 ms medidos), e isso e do ARRANJO, nao do
+// trator — la o modulo fala CAN direto com o motor. Podendo reproduzir o
+// atraso no simulado, da para separar o que e defeito do que e mesa.
+let atrasoMotorMs = 0;
+const filaHeartbeat = [];
+
+// --- as duas chaves do bug da re (ver docs do AgroPreciso) -----------------
+// isReverseOn      = o AOG DETECTA que esta de re (Config > Dados)
+// isSteerInReverse = o piloto CONTINUA estercando de re (tela de direcao)
+let isReverseOn = true;
+let isSteerInReverse = false;
+
+// o que o AOG "acha" que esta acontecendo
+let aogEmRe = false;
+let rumoQueOAogUsa = 0;
+let mostrador = { xte: 0, alvo: 0 };
+
+// ------------------------------------------------------------- firmware
+let fw = null;
+let bufferSaida = '';
+
+function iniciarFirmware() {
+  fw = spawn(EXE, [], { stdio: ['pipe', 'pipe', 'pipe'] });
+  fw.stdout.on('data', (chunk) => {
+    bufferSaida += chunk.toString();
+    let i;
+    while ((i = bufferSaida.indexOf('\n')) >= 0) {
+      const l = bufferSaida.slice(0, i).trim();
+      bufferSaida = bufferSaida.slice(i + 1);
+      if (l) tratarSaidaFirmware(l);
+    }
+  });
+  fw.stderr.on('data', (d) => console.error('[firmware]', d.toString().trim()));
+  fw.on('exit', (c) => console.error('[firmware] encerrou, codigo', c));
+}
+
+const manda = (l) => { if (fw && fw.stdin.writable) fw.stdin.write(l + '\n'); };
+
+function tratarSaidaFirmware(l) {
+  let m;
+  try { m = JSON.parse(l); } catch { return; }
+  if (m.t === 'can_tx') {
+    contadores.canCmd++;
+    motor.receberComando(m.id, m.hex);
+    transmitir({ t: 'quadro', via: 'can', hex: m.hex });
+  } else if (m.t === 'serial_tx') {
+    for (const q of aog.separarQuadros(Buffer.from(m.hex, 'hex'))) {
+      espelho.registrar('simulado', q);
+      const p = aog.parseFromAutoSteer(q);
+      if (p) { ultimoPgn253 = p; contadores.pgn253++; }
+      transmitir({ t: 'quadro', via: 'serial', hex: q.toString('hex').toUpperCase(), decodificado: p });
+    }
+  } else if (m.t === 'state') {
+    estadoFirmware = m;
+  }
+}
+
+// ------------------------------------------------------------- o AOG pensando
+// Reproduz a decisao de re do AgOpenGPS (Position.designer.cs:387 e :471):
+// ele compara o rumo do GPS com o rumo verdadeiro. Com a deteccao DESLIGADA
+// ele assume que esta sempre indo para frente — e ai o rumo fica invertido na
+// re, que e o sintoma do chamado 7.
+function pensarComoAog() {
+  const rumoGps = trator.rumoDoGps();
+
+  if (isReverseOn) {
+    let delta = Math.abs(rumoGps - trator.rumo);
+    while (delta > Math.PI) delta = Math.abs(delta - 2 * Math.PI);
+    aogEmRe = delta > 1.57;
+    rumoQueOAogUsa = aogEmRe ? (rumoGps + Math.PI) % (2 * Math.PI) : rumoGps;
+  } else {
+    aogEmRe = false;
+    rumoQueOAogUsa = rumoGps;      // na re isto aponta para tras: o bug
+  }
+
+  // O AOG guia usando o rumo que ELE acha. Montamos um trator "de mentira"
+  // com esse rumo para calcular o angulo — assim o erro do AOG aparece no
+  // comando, como acontece de verdade.
+  const comoOAogVe = { x: trator.x, y: trator.y, rumo: rumoQueOAogUsa };
+  const mira = Math.max(3, Math.abs(trator.velocidade) * 0.7);
+  const alvo = linha.anguloDesejado(comoOAogVe, mira, trator.entreEixos, trator.velocidade);
+
+  mostrador = { xte: linha.erroLateral(trator), alvo };
+
+  let engatar = pilotoPedido && linha.pronta;
+  if (engatar && !isSteerInReverse && aogEmRe) engatar = false;  // solta na re
+
+  comandoAog = {
+    velocidadeKmh: Math.abs(trator.velocidade),
+    engatar,
+    anguloAlvoGraus: alvo,
+    xte: Math.max(-127, Math.min(127, Math.round(mostrador.xte * 100))),
+  };
+}
+
+// ------------------------------------------------------------- espelho
+// Compara o firmware do PC com o da placa sob o mesmo estimulo.
+const espelho = new Espelho({
+  mandarAoSimulado: (quadro) => manda('S ' + quadro.toString('hex').toUpperCase()),
+  mandarAPlaca: (quadro) => placa.enviar(quadro),
+  aoResultado: (msg) => transmitir(msg),
+});
+
+async function rodarEspelho(qual) {
+  if (!placa.ligada) {
+    transmitir({ t: 'espelhoErro', motivo: 'a placa precisa estar conectada' });
+    return;
+  }
+  // Comparacao justa: a placa nao tem motor, entao o simulado tambem fica sem.
+  const motorAntes = motorRespondendo;
+  const aogAntes = aogLigado;
+  motorRespondendo = false;   // sem heartbeat dos dois lados
+  aogLigado = false;          // so o espelho fala com os firmwares
+  manda('R');                 // simulado do zero
+  placa.reiniciar();          // placa do zero
+  await new Promise((r) => setTimeout(r, 2500));
+
+  const passos = qual === 'estresse' ? roteiroEstresse() : roteiro();
+  const r = await espelho.rodar(passos);
+
+  motorRespondendo = motorAntes;
+  aogLigado = aogAntes;
+  return r;
+}
+
+// ------------------------------------------------------------- laco principal
+let tique = 0;
+let ultimoTique = Date.now();
+
+// Teto de um passo. Se o Node engasgar (coleta de lixo, uma aba pesada), sem
+// isto o firmware receberia um salto de segundos de uma vez.
+const PASSO_MAXIMO_MS = 250;
+
+setInterval(() => {
+  tique++;
+  const naPlaca = modo === 'placa';
+
+  // Quanto tempo passou DE VERDADE desde o ultimo tique.
+  //
+  // Avancar 20 ms fixos parecia certo e nao era: o setInterval do Node nunca
+  // acerta o intervalo, e o relogio do simulado ficava 1,37x mais lento que o
+  // mundo. Na pratica o cao de guarda de 1000 ms so vencia depois de ~1370 ms
+  // reais — e a placa, que anda no relogio dela, desengatava antes. Foi assim
+  // que a comparacao com o hardware apontou o defeito.
+  const agora = Date.now();
+  const decorrido = Math.min(PASSO_MAXIMO_MS, agora - ultimoTique);
+  ultimoTique = agora;
+
+  // 1. o tempo anda no firmware. Na placa o tempo e o do mundo — nao ha o que
+  //    adiantar, e o ESP32 roda no proprio relogio dele.
+  //    No espelho os dois precisam correr, entao o simulado tambem avanca.
+  if (!naPlaca || espelho.rodando) manda('T ' + decorrido);
+
+  // 2. o operador no volante (so quando o piloto nao esta comandando)
+  if (!estadoFirmware.autosteerLigado) {
+    const taxa = 32 * (decorrido / 1000);   // graus por segundo no volante
+    if (estercandoEsq) motor.girarManual(-taxa);
+    if (estercandoDir) motor.girarManual(+taxa);
+  }
+
+  // 3. a fisica do motor e do trator.
+  //
+  // O trator sempre segue a roda FISICA, nunca o que o firmware acha dela.
+  // No modo placa essa roda so se move pela mao do operador (A e D), porque o
+  // motor de verdade esta no barramento CAN, fora do alcance do PC. E ai o
+  // painel fica honesto: voce vira o volante, o trator vira, e o campo
+  // "firmware acha" continua em zero — mostrando que a placa nao faz ideia de
+  // onde a roda esta enquanto o motor nao estiver nela.
+  motor.passo(decorrido);
+  trator.anguloRodas = motor.anguloRodasGraus;
+  trator.passo(decorrido);
+
+  // 4. o motor manda heartbeat.
+  //
+  // No simulado vai para o processo. Na placa COM FIRMWARE DE BANCADA vai pela
+  // USB, e o ESP32 injeta no proprio barramento — e assim a malha fecha com o
+  // tradutor de verdade no meio. Com o firmware de producao nao ha caminho: o
+  // CAN e fisico, e o angulo fica em zero.
+  if (motorRespondendo && !espelho.rodando) {
+    const hb = motor.heartbeat();
+    const entrega = () => {
+      if (naPlaca) { if (placa.temBancada) placa.injetarHeartbeat(hb.hex); }
+      else manda('C ' + hb.id + ' ' + hb.hex);
+    };
+    if (atrasoMotorMs > 0) {
+      filaHeartbeat.push({ quando: agora + atrasoMotorMs, entrega });
+      while (filaHeartbeat.length && filaHeartbeat[0].quando <= agora) filaHeartbeat.shift().entrega();
+    } else {
+      entrega();
+    }
+  }
+
+  // 5. o AOG decide e manda o comando do ciclo.
+  //    Durante o espelho o laco fica calado: quem fala com os firmwares e o
+  //    roteiro, senao o comando do trator se mistura ao estimulo do teste.
+  pensarComoAog();
+  if (aogLigado && !espelho.rodando) {
+    const quadro = aog.steerData(comandoAog);
+    if (naPlaca) placa.enviar(quadro);
+    else manda('S ' + quadro.toString('hex').toUpperCase());
+  }
+
+  // a placa esta viva? (so avisa uma vez, quando o silencio comeca)
+  if (naPlaca && !placaMuda && Date.now() - ultimoPgnDaPlaca > 3000) {
+    placaMuda = true;
+    transmitir({ t: 'placa', ...placaEstado, muda: true });
+  }
+
+  // 6. estado para a tela, a 25 Hz (o mapa fica suave)
+  if (!naPlaca) manda('Q');
+  if (tique % 2 === 0) transmitir(quadroDaTela());
+}, PASSO_MS);
+
+const naPlacaAgora = () => modo === 'placa';
+
+function quadroDaTela() {
+  return {
+    t: 'tela',
+    firmware: estadoFirmware,
+    motor: {
+      anguloRodasGraus: motor.anguloRodasGraus,
+      posicaoMotor: motor.posicaoMotor,
+      velocidadeAtual: motor.velocidadeAtual,
+      habilitado: motor.habilitado,
+      corrente: motor.correnteAtual(),
+      escorregamento: motor.escorregamento,
+      contagensPorGrauReal: motor.contagensPorGrauReal,
+      maoNoVolante: motor.maoNoVolante,
+      travado: motor.travado,
+      batenteGraus: motor.batenteGraus,
+      sentidoMontagem: motor.sentidoMontagem,
+      voltasPorSegundoMax: motor.voltasPorSegundoMax,
+      atrasoMotorMs,
+      alimentandoPlaca: naPlacaAgora() && placa.temBancada,
+      noBatente: motor.noBatente,
+      erro: motor.erro,
+    },
+    trator: {
+      x: trator.x, y: trator.y, rumo: trator.rumo,
+      velocidade: trator.velocidade, marcha: trator.nomeMarcha,
+      marchaEhRe: trator.velocidadeMaxima < 0,
+      maxMarcha: trator.velocidadeMaxima, percorrido: trator.percorrido,
+      rastro: trator.rastro.slice(-900),
+    },
+    guia: {
+      temLinha: linha.pronta, a: linha.a, b: linha.b, rumoLinha: linha.rumoLinha,
+      largura: linha.largura, passada: linha.passadaAtual(trator),
+      xte: mostrador.xte, alvo: mostrador.alvo,
+      pilotoPedido, aogEmRe, rumoQueOAogUsa, isReverseOn, isSteerInReverse,
+    },
+    aog: { ligado: aogLigado, comando: comandoAog, ajustes: ajustesAog,
+           ultimoPgn253, motorRespondendo },
+    modo, placa: { ...placaEstado, muda: placaMuda, bancada: placa.temBancada },
+    contadores,
+  };
+}
+
+// ------------------------------------------------------------- web
+const clientes = new Set();
+function transmitir(msg) {
+  const s = JSON.stringify(msg);
+  for (const c of clientes) if (c.readyState === 1) c.send(s);
+}
+
+const RAIZ_WEB = path.join(__dirname, '..', 'web');
+
+const servidor = http.createServer((req, res) => {
+  const arquivo = req.url === '/' ? 'index.html' : req.url.split('?')[0].slice(1);
+  const caminho = path.join(RAIZ_WEB, arquivo);
+  if (!caminho.startsWith(RAIZ_WEB) || !fs.existsSync(caminho)) {
+    res.writeHead(404); res.end('nao encontrado'); return;
+  }
+  const tipos = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css' };
+  res.writeHead(200, { 'Content-Type': tipos[path.extname(caminho)] || 'text/plain' });
+  fs.createReadStream(caminho).pipe(res);
+});
+
+const wss = new WebSocketServer({ server: servidor });
+wss.on('connection', (ws) => {
+  clientes.add(ws);
+  ws.on('close', () => clientes.delete(ws));
+  // Quem chega agora precisa ver o estado REAL do servidor, nao o que esta
+  // escrito no HTML: senao abrir uma aba nova mostra chave desligada enquanto
+  // o simulador continua com o cabo cortado, e o teste sai errado.
+  ws.send(JSON.stringify({ t: 'sincronizar', aogLigado, motorRespondendo,
+    ajustes: ajustesAog, marchas: MARCHAS.map((m) => m.nome), largura: linha.largura,
+    modo, placa: placaEstado, textoDaPlaca,
+    isReverseOn, isSteerInReverse, pilotoPedido,
+    motor: { maoNoVolante: motor.maoNoVolante, travado: motor.travado,
+             escorregamento: motor.escorregamento, sentidoMontagem: motor.sentidoMontagem,
+             contagensPorGrauReal: motor.contagensPorGrauReal,
+             batenteGraus: motor.batenteGraus, correnteMao: motor.correnteMao,
+             voltasPorSegundoMax: motor.voltasPorSegundoMax,
+             erro: motor.erro } }));
+  ws.on('message', (d) => {
+    let c; try { c = JSON.parse(d.toString()); } catch { return; }
+    aplicarComando(c);
+  });
+});
+
+function mandarAjustes() {
+  const quadro = aog.steerSettings(ajustesAog);
+  if (modo === 'placa') placa.enviar(quadro);
+  else manda('S ' + quadro.toString('hex').toUpperCase());
+}
+
+function aplicarComando(c) {
+  switch (c.acao) {
+    // ---- dirigindo ----
+    case 'acelerar':     trator.acelerando = !!c.valor; break;
+    case 'frear':        trator.freando = !!c.valor; break;
+    case 'esqOn':        estercandoEsq = !!c.valor; break;
+    case 'dirOn':        estercandoDir = !!c.valor; break;
+    case 'marcha':       trator.trocarMarcha(Number(c.valor)); break;
+    case 'piloto':       pilotoPedido = !pilotoPedido; break;
+    case 'marcarA':      linha.marcarA(trator); break;
+    case 'marcarB':      linha.marcarB(trator); break;
+    case 'limparRastro': trator.rastro = []; break;
+    case 'largura':      linha.largura = Math.max(1, Number(c.valor)); break;
+
+    // ---- AOG ----
+    case 'aogLigado':      aogLigado = !!c.valor; break;
+    case 'reverseOn':      isReverseOn = !!c.valor; break;
+    case 'steerInReverse': isSteerInReverse = !!c.valor; break;
+    case 'ajustes':        Object.assign(ajustesAog, c.valor); mandarAjustes(); break;
+    case 'wasZero': {
+      const atual = (estadoFirmware.anguloAtualX100 || 0) / 100;
+      ajustesAog.offsetDirecao += Math.round(ajustesAog.contagensPorGrau * -atual);
+      mandarAjustes();
+      break;
+    }
+
+    // ---- motor ----
+    case 'maoNoVolante':     motor.maoNoVolante = !!c.valor; break;
+    case 'motorTravado':     motor.travado = !!c.valor; break;
+    case 'motorRespondendo': motorRespondendo = !!c.valor; break;
+    case 'escorregamento':   motor.escorregamento = Number(c.valor); break;
+    case 'cpdReal':          motor.contagensPorGrauReal = Number(c.valor); break;
+    case 'correnteMao':      motor.correnteMao = Number(c.valor); break;
+    case 'batente':          motor.batenteGraus = Number(c.valor); break;
+    case 'erroMotor':        motor.erro = Number(c.valor); break;
+    case 'sentidoMontagem':  motor.sentidoMontagem = Number(c.valor); break;
+    case 'pularEncoder':     motor.posicaoMotor += Number(c.valor); break;
+    case 'velMotor':         motor.voltasPorSegundoMax = Number(c.valor); break;
+    case 'atrasoMotor':      atrasoMotorMs = Math.max(0, Number(c.valor)); break;
+
+    // ---- placa de verdade ----
+    case 'listarPortas':
+      listarPortas().then((portas) => transmitir({ t: 'portas', portas }));
+      break;
+    case 'conectarPlaca':
+      placa.conectar(c.valor.caminho, c.valor.baud).then((r) => {
+        if (r.ok) {
+          modo = 'placa';
+          estadoFirmware = { deQuem: 'placa' };   // nada do modo simulado atravessa
+          ultimoPgnDaPlaca = Date.now(); placaMuda = false;
+          mandarAjustes();
+        }
+        transmitir({ t: 'placa', ...placaEstado, modo });
+      });
+      break;
+    case 'rodarEspelho':  rodarEspelho(c.valor); break;
+    case 'pararEspelho':  espelho.parar(); break;
+    case 'reiniciarPlaca':
+      textoDaPlaca = [];
+      transmitir({ t: 'limparTextoPlaca' });
+      placa.reiniciar();
+      break;
+    case 'desconectarPlaca':
+      placa.desconectar().then(() => {
+        modo = 'simulado';
+        estadoFirmware = {};
+        transmitir({ t: 'placa', ...placaEstado, modo });
+      });
+      break;
+
+    // ---- geral ----
+    case 'reset':
+      motor.reset(); trator.reset();
+      linha.a = linha.b = null;
+      pilotoPedido = false;
+      estercandoEsq = estercandoDir = false;
+      // as chaves tambem voltam ao padrao — senao um teste anterior contamina
+      // o proximo sem ninguem perceber
+      aogLigado = true; motorRespondendo = true;
+      isReverseOn = true; isSteerInReverse = false;
+      ajustesAog = { ganhoP: 40, pwmAlto: 180, pwmBaixo: 30, pwmMinimo: 25,
+                     contagensPorGrau: 100, offsetDirecao: 0, ackerman: 100 };
+      contadores = { pgn253: 0, canCmd: 0 };
+      ultimoPgn253 = null;
+      manda('R');
+      break;
+  }
+}
+
+iniciarFirmware();
+servidor.listen(PORTA, () => {
+  console.log('\n  Simulador de traducao do autosteer');
+  console.log('  firmware: ' + path.relative(process.cwd(), EXE));
+  console.log('  abra:     http://localhost:' + PORTA + '\n');
+});
