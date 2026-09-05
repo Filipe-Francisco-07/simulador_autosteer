@@ -1,0 +1,112 @@
+# Antes de sair para o campo
+
+Consolidado do que foi medido até 05/09, no formato de quem vai usar amanhã.
+Não substitui o [plano de calibração](../../AgroPreciso/AgroPreciso/docs/guias/)
+do Pedro — cobre o que **este simulador** aprendeu.
+
+---
+
+## 1. O que rodar antes de sair (≈ 5 minutos)
+
+Na ordem. Cada um responde uma pergunta diferente.
+
+```bash
+# 1. logica pura, na propria placa — 17 checagens
+cd AgroPreciso/firmware/autosteer_can_esp32
+pio test -e esp32doit-devkit-v1 --upload-port COM3 --test-port COM3
+
+# 2. REGRAVA a ponte (o pio test deixa o firmware de teste na placa)
+pio run -e esp32doit-devkit-v1 -t upload --upload-port COM3
+
+# 3. protocolo com a placa real — 10 checagens
+cd ../..
+$env:DOTNET_ROLL_FORWARD='LatestMajor'   # se o dotnet aqui for mais novo que o net8.0
+dotnet run --project tools/aog_fake -- COM3
+
+# 4. comportamento de sistema, sem placa — 6 cenarios
+cd ../simulador_autosteer
+node server/estresse-teste.js
+
+# 5. seguranca com o trator andando — 8 cenarios
+node testes/seguranca.js simulado
+```
+
+⚠️ **Feche o AgIO antes de tudo** — ele segura a porta serial.
+
+## 2. O ajuste que os testes recomendam
+
+### Kp: comece em 20, não em 40
+
+Medido aqui (erro médio nos últimos 10 s, seguindo a passada):
+
+| Kp | sem atraso | 40 ms de atraso | 75 ms |
+|---|---|---|---|
+| **20** | 10 cm | 9 cm | **4 cm** — firme em tudo |
+| 40 | 2 cm | **1,10 m** ✗ | 47 cm |
+| 126 | **48 cm** ✗ | 1,03 m ✗ | 1,14 m ✗ |
+
+- **Kp 126 não estabiliza nem com atraso zero.** Era o valor gravado em 30/08 —
+  o Pedro já tinha alertado na análise, e aqui está o número.
+- Kp 40 dá o melhor acabamento, mas não perdoa atraso nenhum.
+- Kp 20 é o robusto. Subir depois que a linha estiver limpa, um passo por vez.
+
+### Os outros
+
+| Ajuste | Valor | Por quê |
+|---|---|---|
+| Max Steer Speed | 10 km/h | trabalho é a 5-8; o limite é para o acelerador sem pensar |
+| Min Steer Speed | 1 km/h | evita esterçar parado, que castiga direção e solo |
+| RTK Kill Autosteer | **ligado** | sem Fix o erro vira metros e o piloto segue confiante |
+| Side Hill Comp | 0 | só depois que CPD e Invert Roll estiverem calibrados |
+| Max Steer Angle | menor batente − 3° | com o valor cheio, o motor força o fim de curso e o override dispara na cabeceira |
+
+## 3. Se o piloto não engatar: faça isto ANTES de qualquer diagnóstico
+
+**Desligue o piloto na tela e ligue de novo.**
+
+A trava de segurança do firmware só solta na borda de descida do pedido
+([medido na placa](05-trava-de-seguranca.md)). Se ela armou — por override
+legítimo ou por um pico de corrente — o piloto **para de responder ao botão** e
+parece defeito. Um ciclo desliga/liga resolve.
+
+Foi isso que derrubou o AogFake em 01/09, e o mesmo AogFake passou 10/10 aqui
+depois, com a placa recém-reiniciada.
+
+## 4. O que está provado
+
+| | Onde foi medido |
+|---|---|
+| o cão de guarda do AOG solta em **1000 ms exatos** | placa |
+| o cão de guarda do motor solta em ~1000 ms | placa e simulado |
+| a mão no volante desengata **e continua solto** | placa e simulado |
+| o parser se recupera de lixo no fio em **2 a 3 quadros** (220-330 ms) | placa |
+| o encoder atravessa o estouro de 16 bits sem perder a conta | placa e simulado |
+| o encoder **não deriva**: 8 giros batente a batente, variação 0,00° | placa e simulado |
+| forçar o batente sobe a corrente e desengata sozinho | simulado |
+| o firmware compilado no PC se comporta como o do ESP32 | espelho, 20/21 |
+
+## 5. O que continua SEM cobertura
+
+Honestidade sobre o que o simulador não alcança:
+
+- **O limiar do override sob carga.** É o item de segurança em aberto, e o
+  próprio plano de calibração marca como bloqueante. Precisa do motor no trator,
+  com o peso da direção. Nem o simulador nem o AogFake chegam lá. **§2.5 do
+  plano de calibração, no pátio, antes de qualquer teste em movimento.**
+- **O barramento CAN físico.** No modo bancada os quadros nascem e morrem dentro
+  do ESP32. O transceptor e a fiação não entram — e o log de 01/09 mostrou falha
+  de TX sistemática, que aponta para motor desligado, CAN-H/CAN-L trocados ou
+  **terra comum ausente** (obrigatório, não opcional).
+- **Motor montado ao contrário não é detectado.** O teste do Pedro mostra: o
+  firmware acha que chegou nos 15° enquanto a roda está em −15°, e nada acusa.
+  Sem WAS não há como saber. **Conferir o sentido com o Free Drive antes de
+  qualquer coisa.**
+- **A deriva do encoder no orbitrol real.** Aqui o escorregamento é um controle;
+  quanto ele escorrega de verdade, só o campo diz.
+
+## 6. A pergunta do WAS, em uma linha
+
+Com escorregamento do orbitrol, **o erro acumula, não estabiliza** — medimos 14%
+de escorregamento levando a diferença de 7,1° para 10,2° em poucos segundos, sem
+voltar. Se o orbitrol real escorregar, o encoder sozinho deriva ao longo do
+trabalho. **Medir o escorregamento real é o que fecha a decisão do WAS.**

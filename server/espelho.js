@@ -38,6 +38,12 @@ class Espelho {
   // diferentes a cada rodada, e as divergencias pareciam aleatorias porque
   // eram: eram do metodo, nao dos firmwares.
   async rodar(passos) {
+    if (this.rodando) {
+      // Uma segunda chamada em cima da primeira fazia a rodada anterior
+      // terminar pela metade e reportar um placar sem sentido ("8 de 21").
+      this.aoResultado({ t: 'espelhoErro', motivo: 'ja existe um espelho rodando' });
+      return { iguais: 0, divergencias: [] };
+    }
     this.rodando = true;
     this.passos = passos;
     this.divergencias = [];
@@ -68,8 +74,20 @@ class Espelho {
       }
 
       // Compara so o que chegou na ULTIMA janela, ja estabilizado.
+      //
+      // A janela precisa caber varios relatorios (o modulo manda a 10 Hz) e
+      // ainda ser alimentada, senao o cao de guarda entra no meio. Com 320 ms
+      // pegavamos 2-3 quadros e uma leitura fora de compasso ja mudava o
+      // resultado — dai as divergencias que mudavam de rodada.
       this.respostas = { simulado: [], placa: [] };
-      await pausa(320);
+      const fimJanela = Date.now() + 700;
+      while (Date.now() < fimJanela) {
+        await pausa(100);
+        if (manutencao && Date.now() < fimJanela - 150) {
+          this.mandarAoSimulado(manutencao);
+          this.mandarAPlaca(manutencao);
+        }
+      }
 
       const s = maisFrequente(this.respostas.simulado);
       const p = maisFrequente(this.respostas.placa);
@@ -149,6 +167,13 @@ function roteiro() {
   const cmd = (o) => aog.steerData({ velocidadeKmh: 5, engatar: true, anguloAlvoGraus: 0, xte: 0, ...o });
 
   return [
+    // Passo zero, obrigatorio: soltar o pedido de engate ANTES de qualquer
+    // coisa. A trava de seguranca do firmware so cai na borda de descida
+    // (`engateDecidir`), entao um teste que engata direto pode estar rodando
+    // em cima de trava herdada da sessao anterior e ver o modulo "morto".
+    // Foi o que derrubou o AogFake em 01/09 — e derrubou este espelho tambem,
+    // ate a placa passar a reportar 100 (o CPD de repouso) em vez do PWM.
+    { nome: 'solta o pedido (destrava a seguranca)', enviar: [cfg({}), cmd({ engatar: false })], esperaMs: 700 },
     { nome: 'parado, sem engate', enviar: [cfg({}), cmd({ engatar: false })] },
     { nome: 'engatado, alvo 0', enviar: [cmd({ anguloAlvoGraus: 0 })] },
     { nome: 'alvo 2 graus, Kp 40 (espera pwm 80)', enviar: [cfg({ ganhoP: 40 }), cmd({ anguloAlvoGraus: 2 })] },
