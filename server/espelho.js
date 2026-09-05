@@ -228,6 +228,10 @@ function roteiroEstresse() {
   const doisJuntos = Buffer.concat([cmd({ anguloAlvoGraus: 3 }), cmd({ anguloAlvoGraus: 7 })]);
 
   const passos = [
+    // Mesmo passo zero do roteiro normal: soltar o pedido destrava a seguranca
+    // antes de comecar. Sem ele, um teste anterior que armou a trava faz todo
+    // o resto rodar contra um modulo que nao aciona.
+    { nome: 'solta o pedido (destrava a seguranca)', enviar: [cfg({}), cmd({ engatar: false })], esperaMs: 700 },
     { nome: 'base: alvo 5 graus', enviar: [cfg({}), normal] },
     { nome: 'CRC errado (deve ignorar ou aceitar — mas IGUAL)', enviar: [crcRuim] },
     { nome: 'volta ao normal depois do CRC errado', enviar: [normal] },

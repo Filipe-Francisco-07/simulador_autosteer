@@ -118,7 +118,21 @@ private:
     }
 
     void passar(const uint8_t* d, uint8_t n) {
+        // Abre espaco ANTES de escrever: sem isto a fila enche ate o teto e
+        // passa a descartar quadro em silencio. Era o que comia o PGN 252 da
+        // zeragem — o operador apertava "zerar rodas" e nada acontecia, sem
+        // nenhum aviso.
+        if (fim + n > sizeof fila) recolher();
         for (uint8_t i = 0; i < n && fim < sizeof fila; i++) fila[fim++] = d[i];
+    }
+
+    // Empurra o que ainda nao foi lido para o inicio da fila.
+    void recolher() {
+        if (ini == 0) return;
+        const uint16_t sobra = fim - ini;
+        for (uint16_t i = 0; i < sobra; i++) fila[i] = fila[ini + i];
+        ini = 0;
+        fim = sobra;
     }
 
     uint8_t buf[40] = {0};
@@ -127,8 +141,11 @@ private:
     uint16_t ini = 0, fim = 0;
 
 public:
-    // chamado uma vez por volta do laco: recicla a fila quando ela esvazia
-    void compactar() { if (ini >= fim) { ini = 0; fim = 0; } }
+    // chamado uma vez por volta do laco
+    void compactar() {
+        if (ini >= fim) { ini = 0; fim = 0; }
+        else if (ini > sizeof fila / 2) recolher();
+    }
 };
 
 static SerialFiltrada serialFiltrada;

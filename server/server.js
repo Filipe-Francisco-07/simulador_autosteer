@@ -246,11 +246,18 @@ async function rodarEspelho(qual) {
     transmitir({ t: 'espelhoErro', motivo: 'a placa precisa estar conectada' });
     return;
   }
-  // Comparacao justa: a placa nao tem motor, entao o simulado tambem fica sem.
+  // Comparacao justa exige o MESMO estado dos dois lados — e desligar o motor
+  // nao dava isso. Sem heartbeat, o cao de guarda do motor so age em quem ja
+  // viu o motor alguma vez (`keyaVisto`), e esse historico difere entre a placa
+  // e o processo recem-reiniciado. O resultado eram divergencias que pareciam
+  // do firmware e eram de estado.
+  //
+  // Com o firmware de bancada o motor simulado alimenta OS DOIS com o mesmo
+  // heartbeat, entao manter ligado e mais justo e mais parecido com o trator.
   const motorAntes = motorRespondendo;
   const aogAntes = aogLigado;
-  motorRespondendo = false;   // sem heartbeat dos dois lados
-  aogLigado = false;          // so o espelho fala com os firmwares
+  motorRespondendo = placa.temBancada;   // na bancada os dois recebem o motor
+  aogLigado = false;                     // so o espelho fala com os firmwares
   manda('R');                 // simulado do zero
   placa.reiniciar();          // placa do zero
   await new Promise((r) => setTimeout(r, 2500));
@@ -316,11 +323,18 @@ setInterval(() => {
   // USB, e o ESP32 injeta no proprio barramento — e assim a malha fecha com o
   // tradutor de verdade no meio. Com o firmware de producao nao ha caminho: o
   // CAN e fisico, e o angulo fica em zero.
-  if (motorRespondendo && !espelho.rodando) {
+  if (motorRespondendo) {
     const hb = motor.heartbeat();
     const entrega = () => {
-      if (naPlaca) { if (placa.temBancada) placa.injetarHeartbeat(hb.hex); }
-      else manda('C ' + hb.id + ' ' + hb.hex);
+        // No espelho os dois firmwares precisam do mesmo heartbeat.
+      if (espelho.rodando) {
+        manda('C ' + hb.id + ' ' + hb.hex);
+        if (placa.temBancada) placa.injetarHeartbeat(hb.hex);
+      } else if (naPlaca) {
+        if (placa.temBancada) placa.injetarHeartbeat(hb.hex);
+      } else {
+        manda('C ' + hb.id + ' ' + hb.hex);
+      }
     };
     if (atrasoMotorMs > 0) {
       filaHeartbeat.push({ quando: agora + atrasoMotorMs, entrega });

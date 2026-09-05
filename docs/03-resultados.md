@@ -24,18 +24,36 @@ offset grande, cão de guarda e **CPD 1 e 2** (a causa raiz de 30/08).
 **Nenhuma divergência.** O firmware compilado no PC se comporta igual ao
 gravado no ESP32, inclusive nos extremos que quebraram em campo.
 
-### Roteiro de estresse — 24/24 (duas de três rodadas)
+### Roteiro de estresse — 24 a 25 de 25
 
 Quadro com CRC errado, tamanho mentiroso, PGN desconhecido, só cabeçalho, lixo
 puro, dois quadros colados, CPD 0, alvo no extremo do `int16`, `pwmMinimo`
 maior que `pwmAlto`, ganho 0 e 255, rajada de 30 quadros, engata/desengata 20
 vezes seguidas.
 
-A única divergência que sobrou aparece de vez em quando no passo da rajada —
-ver §4.
-
 > **Conclusão:** o modo simulado pode ser usado para julgar o comportamento do
 > firmware. Isso não era garantido antes; agora é medido.
+
+### A variabilidade que sobra, e por que ela não muda a conclusão
+
+Repetindo as rodadas, o placar oscila (17 a 21 de 21 no roteiro normal; 24 a 25
+de 25 no de estresse). **As divergências são sempre do mesmo tipo**: a placa
+reporta `100` — o CPD de repouso, ou seja, ela **não estava acionando naquele
+instante** — enquanto o simulado reporta um PWM.
+
+Não é diferença de cálculo: é diferença de *momento*. Duas causas conhecidas,
+as duas do arranjo:
+
+1. **A trava de segurança** herdada de um teste anterior (§ [05](05-trava-de-seguranca.md)).
+   O roteiro passou a começar soltando o pedido de engate, o que reduziu muito
+   — mas não elimina, porque a trava pode armar durante a própria rodada.
+2. **Latência da USB.** A placa responde ~25 ms depois; se o relatório dela sai
+   no meio da mudança, a leitura pega o estado anterior.
+
+Nenhuma divergência até hoje mostrou os dois firmwares **calculando coisas
+diferentes** para o mesmo estado. Enquanto for assim, a conclusão se sustenta —
+e vale continuar rodando, porque é exatamente esse o caso que o espelho existe
+para pegar.
 
 ## 2. Cão de guarda: 1000 ms nos dois
 
@@ -120,6 +138,43 @@ caminho do motor. Erro médio nos últimos 10 s:
 > **Para o próximo teste de campo:** começar em **Kp 20**. Subir só depois que a
 > linha estiver limpa, e um passo por vez.
 
+## 8. Rotina de partida: a âncora do offset funciona
+
+Sem WAS o ângulo é relativo ao boot, mas o AOG **guarda** o `wasOffset` entre
+sessões e o reenvia na partida — apontando para uma origem que não existe mais.
+Em 30/08 o valor salvo era **283** e o ângulo nascia a dezenas de graus do real,
+em silêncio. O firmware ganhou uma âncora (`ancorarOffset`).
+
+Medido com o valor real daquele dia, no simulado **e na placa**:
+
+| Passo | Resultado |
+|---|---|
+| offset 283 chega na partida | ângulo nasce em **0,00°** — a âncora pega |
+| gira o volante até o batente | estimado 40,00° · roda 40,00° — acompanha |
+| aperta "zerar rodas" com a roda torta | zera ali mesmo |
+
+O terceiro passo é o lembrete de por que a rotina manda zerar com as **rodas
+retas**: zerar torto ensina ao módulo que torto é o zero.
+
+## 7. A ré (chamado 7) — reproduzida nos dois arranjos
+
+Três combinações das duas chaves do AgOpenGPS, medidas no simulado **e na placa**
+(resultado idêntico):
+
+| Detectar ré | Esterçar de ré | O que acontece andando para trás |
+|---|---|---|
+| ligado | desligado *(padrão)* | o AOG detecta e **o piloto solta** — seguro |
+| ligado | ligado | detecta e **continua esterçando** — escolha do operador |
+| **desligado** | desligado | **não detecta**: o rumo trava apontando para frente e **o piloto continua acionando** |
+
+A terceira linha é o chamado 7. O sintoma não é o piloto desengatar: é ele
+**continuar trabalhando com o rumo invertido**, esterçando para o lado errado
+com confiança.
+
+> Confirma o que já estava na
+> [referência de configurações](../../AgroPreciso/AgroPreciso/docs/arquitetura/agopengps-configuracoes-completo.md):
+> é configuração, não código. `node testes/re.js bancada` reproduz.
+
 ---
 
 ## Defeitos encontrados — e de quem eram
@@ -137,6 +192,13 @@ teste**, e cada um teria virado uma acusação falsa contra o firmware:
 | 6 | divergências aleatórias no espelho | método: eu mandava o estímulo e ficava calado, então o cão de guarda disparava no meio da comparação | o espelho repete o comando, como o AOG de verdade faz |
 | 7 | "a placa oscila entre 180 e 0" | script de medição: eu reprocessava o buffer inteiro a cada chegada, e quadros antigos reapareciam | consumir o buffer a cada quadro lido |
 | 8 | a bancada parecia estável com PWM 100 fixo | leitura: o byte 12 do PGN 253 **vira o CPD quando o PWM é zero** (`byteDiagnostico`, decisão do Pedro em 30/08). Eu lia como PWM | na bancada, ler o PWM do comando CAN ecoado |
+| 9 | **"zerar rodas" não funcionava na placa** | firmware de bancada: a fila do filtro serial só era reciclada quando esvaziava **por completo**. Sobrando um byte, ela enchia até o teto e passava a **descartar PGN em silêncio** | abrir espaço antes de escrever, empurrando o que falta ler para o início |
+| 10 | divergências do espelho que mudavam de rodada | método: o espelho desligava o motor "para ser justo", mas o cão de guarda do heartbeat só age em quem **já viu** o motor — e esse histórico diferia entre a placa e o processo recém-reiniciado | alimentar os dois firmwares com o mesmo heartbeat |
+
+O nº 9 é o mais instrutivo do dia: o sintoma era **o operador apertar "zerar
+rodas" e nada acontecer**, sem nenhum aviso. Um comando descartado em silêncio
+é o pior tipo de falha — e ela estava na minha ponte, não no firmware. Só
+apareceu porque o mesmo teste rodava nos dois lados e um deles discordou.
 
 O **nº 5 é o mais sério**, e só apareceu porque havia hardware do lado para
 comparar: sem a placa, o simulador teria continuado dando prazos 37% mais
