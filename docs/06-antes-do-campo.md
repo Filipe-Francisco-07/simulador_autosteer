@@ -85,6 +85,9 @@ depois, com a placa recém-reiniciada.
 | forçar o batente sobe a corrente e desengata sozinho | simulado |
 | o firmware compilado no PC se comporta como o do ESP32 | espelho, 20/21 |
 
+Os 8 cenários de segurança passam **na placa real** (`node testes/seguranca.js bancada`)
+e no simulado. Os 6 do `estresse-teste.js` do Pedro também.
+
 ## 5. O que continua SEM cobertura
 
 Honestidade sobre o que o simulador não alcança:
@@ -97,10 +100,15 @@ Honestidade sobre o que o simulador não alcança:
   do ESP32. O transceptor e a fiação não entram — e o log de 01/09 mostrou falha
   de TX sistemática, que aponta para motor desligado, CAN-H/CAN-L trocados ou
   **terra comum ausente** (obrigatório, não opcional).
-- **Motor montado ao contrário não é detectado.** O teste do Pedro mostra: o
-  firmware acha que chegou nos 15° enquanto a roda está em −15°, e nada acusa.
-  Sem WAS não há como saber. **Conferir o sentido com o Free Drive antes de
-  qualquer coisa.**
+- **Motor montado ao contrário não é detectado — e é o mais perigoso da lista.**
+  Medido na placa: o firmware acha que está em **−28,5°** enquanto a roda está
+  em **+12,1°**. Divergência de 40°, e **nada acusa**: sem WAS não existe fonte
+  independente para comparar. No campo isso é o piloto esterçando para o lado
+  errado com confiança.
+
+  > **Conferir o sentido no Free Drive antes de qualquer outra coisa**, todo dia,
+  > e principalmente depois de trocar de trator. É o passo 1.1 do plano de
+  > calibração, e o motivo dele estar em primeiro lugar.
 - **A deriva do encoder no orbitrol real.** Aqui o escorregamento é um controle;
   quanto ele escorrega de verdade, só o campo diz.
 

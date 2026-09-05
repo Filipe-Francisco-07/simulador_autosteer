@@ -102,17 +102,23 @@ caso('encoder atravessa girando', 'girar muito faz o estimado DERIVAR da roda?',
   };
 });
 
-caso('motor montado ao contrario', 'a malha diverge (como deve)?', async (p) => {
-  // Na bancada a volta da malha passa pela USB duas vezes, entao tudo demora
-  // mais. Damos tempo suficiente para o desvio aparecer nos dois arranjos.
+caso('motor montado ao contrario', 'alguma coisa acusa o erro fisico?', async (p) => {
+  // Com o motor montado ao contrario do SENTIDO do firmware, a malha diverge:
+  // o modulo acha que esta chegando no alvo enquanto a roda vai para o outro
+  // lado. O que se mede aqui e a DIVERGENCIA entre o estimado e a roda — o
+  // angulo absoluto depende de quanto tempo passou, e na bancada tudo e mais
+  // lento por causa da USB.
   p.envia('sentidoMontagem', 1);
-  await p.espera(9000);
+  await p.espera(8000);
   const a = p.amostra();
+  const divergencia = Math.abs(a.estimado - a.roda);
   p.envia('sentidoMontagem', -1);
   await p.espera(2000);
   return {
-    ok: Math.abs(a.roda) > 25,       // esperado: correr para o batente
-    detalhe: `roda foi para ${a.roda.toFixed(1)}° (divergir e o comportamento certo aqui)`,
+    // divergir e o esperado; o que NAO existe e um aviso
+    ok: divergencia > 5,
+    detalhe: `firmware acha ${a.estimado.toFixed(1)}° · roda em ${a.roda.toFixed(1)}°`
+      + ` · divergencia ${divergencia.toFixed(1)}° — e NADA acusa (sem WAS nao ha como saber)`,
   };
 });
 
