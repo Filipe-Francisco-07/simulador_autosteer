@@ -103,8 +103,10 @@ caso('encoder atravessa girando', 'girar muito faz o estimado DERIVAR da roda?',
 });
 
 caso('motor montado ao contrario', 'a malha diverge (como deve)?', async (p) => {
+  // Na bancada a volta da malha passa pela USB duas vezes, entao tudo demora
+  // mais. Damos tempo suficiente para o desvio aparecer nos dois arranjos.
   p.envia('sentidoMontagem', 1);
-  await p.espera(6000);
+  await p.espera(9000);
   const a = p.amostra();
   p.envia('sentidoMontagem', -1);
   await p.espera(2000);

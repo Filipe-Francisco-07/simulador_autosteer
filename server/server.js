@@ -43,6 +43,7 @@ let ajustesAog = { ganhoP: 40, pwmAlto: 180, pwmBaixo: 30, pwmMinimo: 25,
 let motorRespondendo = true;   // o Keya esta mandando heartbeat?
 let estadoFirmware = {};
 let pwmRealDaPlaca = 0;      // vem do comando CAN ecoado (so no firmware de bancada)
+let ultimoEnableDaPlaca = 0; // quando a placa mandou o ultimo ENABLE ao motor
 let ultimoPgn253 = null;
 let contadores = { pgn253: 0, canCmd: 0 };
 
@@ -84,6 +85,13 @@ const placa = new Placa({
         // na bancada o PWM verdadeiro vem do comando CAN; sem ele, o byte de
         // diagnostico e o que ha — e ele vira CPD quando o motor esta parado
         pwmSaida: placa.temBancada ? pwmRealDaPlaca : p.pwm,
+        // "esta acionando?" na placa: mandou ENABLE ha menos de 600 ms.
+        // O firmware manda comando CAN a cada 50 ms, entao 600 ms de silencio
+        // ja e sinal claro de que parou. Uma janela maior atrasa a leitura e
+        // faz um desengate correto parecer falha.
+        autosteerLigado: placa.temBancada
+          ? (Date.now() - ultimoEnableDaPlaca < 600)
+          : undefined,
         byteDiagnostico: p.diagnostico,
         chaves: p.chaves,
         deQuem: 'placa',
@@ -101,6 +109,11 @@ const placa = new Placa({
   // modulo do PWM que o PGN 253 reporta.
   aoComandoCan: (dados) => {
     motor.receberComando(0, dados.toString('hex'));
+    // Quando o firmware desengata ele manda velocidade 0 + DISABLE. Entao o
+    // ENABLE e a prova de que ele esta acionando o motor AGORA — o unico sinal
+    // confiavel de engate na placa, ja que as variaveis internas nao saem de la.
+    const h = dados.toString('hex').toUpperCase();
+    if (h.startsWith('230D2001')) ultimoEnableDaPlaca = Date.now();
     contadores.canCmd++;
     // O comando de velocidade diz o PWM de verdade, com sinal — o campo do
     // PGN 253 vira o CPD quando o PWM e zero, entao nao serve sozinho.

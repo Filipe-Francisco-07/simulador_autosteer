@@ -81,7 +81,11 @@ class Piloto {
       roda: e.motor.anguloRodasGraus,
       estimado: (e.firmware.anguloAtualX100 || 0) / 100,
       pwm: e.firmware.pwmSaida ?? null,
-      piloto: !!e.firmware.autosteerLigado || (e.guia.pilotoPedido && e.modo === 'placa'),
+      // "o firmware esta acionando o motor?" — no simulado vem da variavel
+      // interna; na placa, do comando ENABLE que ela manda ao motor. Usar
+      // `pilotoPedido` aqui seria ler o botao do operador, nao o firmware, e
+      // foi o que fez os testes de seguranca acusarem falha que nao existia.
+      piloto: !!e.firmware.autosteerLigado,
       velocidade: e.trator.velocidade,
       rumo: e.trator.rumo * 180 / Math.PI,
     };
