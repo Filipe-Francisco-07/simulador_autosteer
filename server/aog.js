@@ -49,17 +49,35 @@ function hello() {
 
 // PGN 253 — a resposta do modulo.
 //
-// ATENCAO: o byte 12 NAO e so o PWM. O firmware faz (main.cpp, byteDiagnostico):
+// ATENCAO: o byte 12 NAO e so o PWM. O firmware faz (main.cpp, no envio do 253):
 //
-//     if (pwm == 0) return cpdEmUso;   // acionando zero? manda o CPD
+//     const uint8_t diag = controle.pwm ? abs(controle.pwm) : (uint8_t)controle.falha;
 //
-// Foi decisao deliberada depois do teste de campo de 30/08: com o CPD errado o
-// angulo saia 5x menor e ninguem via qual valor o modulo usava. Agora o proprio
-// campo denuncia — mas quem le sem saber acha que o motor esta acionando com
-// forca 100 quando ele esta parado.
+// Ou seja: ACIONANDO manda o PWM de verdade; PARADO manda o CODIGO DA FALHA.
+// Ate 06/09 o valor parado era o CPD em uso; mudou em 07/09 e a tabela abaixo e
+// a nova. Quem le sem saber acha que o motor esta acionando com forca 5 quando
+// na verdade ele esta parado por sobrecorrente.
 //
 // Nao da para distinguir os dois pelo numero. Na bancada, o comando CAN ecoado
 // diz o PWM de verdade; sem ele, resta o byte como esta.
+const FALHAS = [
+  'nenhuma',
+  'sem zero de partida',
+  'salto de encoder',
+  'sem heartbeat do motor',
+  'sem PGN do AOG',
+  'sobrecorrente',
+  'motor em erro',
+  'transporte CAN',
+  'ajuste trocado ou recusado',
+  'fora do curso',
+  'abaixo da velocidade minima',
+];
+
+function nomeDaFalha(codigo) {
+  return FALHAS[codigo] || ('codigo ' + codigo);
+}
+
 function parseFromAutoSteer(buf) {
   if (buf.length < 14 || buf[0] !== 0x80 || buf[1] !== 0x81 || buf[3] !== 0xFD) return null;
   const diagnostico = buf[12];
@@ -68,8 +86,11 @@ function parseFromAutoSteer(buf) {
     rumoX10:    buf.readUInt16LE(7),
     rolagemX10: buf.readInt16LE(9),
     chaves:     buf[11],
-    pwm:        diagnostico,      // pode ser o PWM ou o CPD — ver acima
+    pwm:        diagnostico,      // pode ser o PWM ou o codigo de falha — ver acima
     diagnostico,
+    // So vale como falha se o modulo estiver parado, e isso o 253 sozinho nao
+    // diz. Quem sabe e o eco do CAN na bancada; sem ele fica a leitura otimista.
+    falhaSeParado: nomeDaFalha(diagnostico),
     crcOk:      buf[13] === crc(buf.subarray(0, 14)),
   };
 }
@@ -102,5 +123,6 @@ function separarQuadros(bytes) {
   return quadros;
 }
 
-module.exports = { steerData, steerSettings, hello, parseFromAutoSteer, separarQuadros, crc,
+module.exports = {
+  nomeDaFalha, FALHAS, steerData, steerSettings, hello, parseFromAutoSteer, separarQuadros, crc,
                    velocidadeDoComandoKeya };

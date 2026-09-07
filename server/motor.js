@@ -29,7 +29,13 @@ class MotorKeya {
     this.erro = 0;              // bit0 = desabilitado/falha
 
     // ---- parametros que o operador do simulador controla ----
-    this.contagensPorGrauReal = 100;  // quanto o encoder anda por grau de roda
+    // Quanto o encoder anda por grau de RODA. Nao e escolha de projeto: e a
+    // maquina. Pedro mediu no JD 5078 em 05/09 que o fim de curso fica a ~760
+    // contagens do centro; com ~40 graus de roda ate la, sao ~19 contagens por
+    // grau. Estava 100 aqui (o padrao de tela do AOG), o que fazia o motor
+    // simulado precisar de 5x mais contagens do que o real para o mesmo angulo
+    // — e enchia o firmware de "salto de encoder" a cada esterçada na mao.
+    this.contagensPorGrauReal = 19;
     // Como o motor esta montado no volante. O firmware tem a sua propria
     // constante SENTIDO; se as duas discordarem, a malha diverge em vez de
     // convergir — foi o que aconteceu na bancada em 29/08. Deixar isso como
@@ -43,10 +49,12 @@ class MotorKeya {
     this.travado = false;             // motor fisicamente travado
     this.noBatente = false;           // encostou no fim de curso neste ciclo
     // Velocidade do motor a pleno. NAO E MEDIDA — ver nota em passo().
-    // 4 voltas/s dao ~14 graus de roda por segundo com CPD 100, que e a ordem
-    // de grandeza de um autosteer que consegue corrigir antes do trator sair
-    // da linha. E um controle da tela justamente porque a resposta certa vem
-    // de cronometrar o motor de verdade, batente a batente.
+    // 4 voltas/s dao 1440 contagens/s; com o CPD real (~19) isso sao ~76 graus
+    // de roda por segundo, ou seja batente a batente em pouco mais de um
+    // segundo. E RAPIDO — com CPD 100 a mesma conta dava 14 graus/s e o
+    // simulador parecia muito mais manso do que a maquina e. Quem for confiar
+    // em sintonia de Kp tirada daqui precisa cronometrar o motor de verdade
+    // batente a batente antes; ver docs/07-calibragem-por-gps.md.
     this.voltasPorSegundoMax = 4;
   }
 
