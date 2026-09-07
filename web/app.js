@@ -58,6 +58,8 @@ $('btnA').onclick = () => enviar('marcarA');
 $('btnB').onclick = () => enviar('marcarB');
 $('btnRastro').onclick = () => enviar('limparRastro');
 $('btnZero').onclick = () => enviar('wasZero');
+$('btnAplicarCal').onclick = () => enviar('aplicarCalibragem');
+$('btnZerarCal').onclick = () => { enviar('reiniciarCalibragem'); anotar('calibragem: recomecando a medida'); };
 $('btnReset').onclick = () => {
   enviar('reset');
   $('eventos').innerHTML = '';
@@ -321,6 +323,13 @@ ws.onmessage = (ev) => {
     if (m.estado === 'desligada') anotar('placa desconectada');
     return;
   }
+  // resposta do "Aplicar no AgOpenGPS"
+  if (m.t === 'calibragem') {
+    anotar(m.ok
+      ? `calibragem aplicada: CPD ${m.antes.cpd} -> ${m.agora.cpd}, offset ${m.agora.offset}`
+      : 'calibragem nao aplicada: ' + m.motivo);
+    return;
+  }
   if (m.t === 'limparTextoPlaca') { $('textoPlaca').innerHTML = ''; return; }
   if (m.t === 'textoPlaca') {
     const el = $('textoPlaca');
@@ -404,6 +413,31 @@ ws.onmessage = (ev) => {
   $('mCorrente').innerHTML = naPlaca ? semLeitura : nn(f.correnteMedia || 0) + '<small>A</small>';
   $('mEncoder').innerHTML = naPlaca ? semLeitura : String(Math.round(f.encoderAcumulado || 0));
   $('mAlvo').innerHTML = nn(g.alvo || 0) + '<small>°</small>';
+
+  // Calibragem pelo GPS. Enquanto nao houver passeio suficiente ele diz o que
+  // falta em vez de mostrar numero — numero inventado aqui manda o operador
+  // configurar errado com confianca.
+  const c = m.calibragem;
+  if (c && c.pronto) {
+    $('cCpd').innerHTML = nn(c.cpd, 1) + (c.invertido ? ' <small>invertido!</small>' : '');
+    $('cCentro').textContent = Math.round(c.centro);
+    $('cR2').innerHTML = 'R²&nbsp;' + c.r2.toFixed(2);
+    const laudo = $('cLaudo');
+    if (laudo.dataset.n !== String(c.n)) {
+      laudo.dataset.n = String(c.n);
+      laudo.innerHTML = '';
+      for (const l of (c.laudo || [])) {
+        const d = document.createElement('div');
+        d.textContent = l;
+        laudo.appendChild(d);
+      }
+    }
+  } else {
+    $('cCpd').innerHTML = semLeitura;
+    $('cCentro').innerHTML = semLeitura;
+    $('cR2').innerHTML = semLeitura;
+    $('cLaudo').textContent = c ? ('faltando: ' + c.motivo) : '';
+  }
 
   $('seloPos').textContent =
     `${(t.percorrido || 0).toFixed(0)} m percorridos · rumo ${((t.rumo || 0) * 180 / Math.PI).toFixed(0)}°`;

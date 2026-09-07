@@ -315,6 +315,25 @@ button.primario.ligado{background:var(--ativo);border-color:var(--ativo)}
     </div>
   </section>
 
+  <section class="modulo">
+    <h2>Calibragem pelo GPS <span class="lado">o que a roda faz de verdade</span></h2>
+    <div class="corpo">
+      <div class="leituras" style="margin-bottom:9px">
+        <div class="leitura"><div class="r">CPD medido</div><div class="n" id="cCpd">—</div></div>
+        <div class="leitura"><div class="r">Centro medido</div><div class="n" id="cCentro">—</div></div>
+        <div class="leitura"><div class="r">Confiança</div><div class="n" id="cR2">—</div></div>
+      </div>
+      <div class="registro" id="cLaudo"></div>
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <button id="btnAplicarCal">Aplicar no AgOpenGPS</button>
+        <button id="btnZerarCal">Recomeçar medida</button>
+      </div>
+      <p class="dica">Sai do GPS, não do encoder — por isso serve para conferir o
+        encoder. Precisa do trator andando e esterçando para os dois lados:
+        vira, <b>segura alguns segundos</b>, vira mais.</p>
+    </div>
+  </section>
+
   <section class="modulo quente">
     <h2>Motor Keya <span class="lado">você é o hardware</span></h2>
     <div class="corpo">
