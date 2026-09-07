@@ -121,6 +121,16 @@ escorregamento e veja a diferença crescer: é a medida de quanto o sistema sem
 WAS erra. Vale testar também **contagens por grau reais** diferente do CPD
 configurado no AOG — é o caso de a calibração estar simplesmente errada.
 
+### Calibragem pelo GPS
+
+Desde 07/09 tem um caminho para responder isso sem sensor nenhum: o painel
+**Calibragem pelo GPS** mede o ângulo real das rodas pela curvatura do caminho e
+descobre o CPD, o centro e se o motor está montado ao contrário. Bota o CPD real
+num valor e o configurado noutro, dá um passeio esterçando para os dois lados, e
+veja ele achar a diferença.
+
+Detalhes e limites em [docs/07-calibragem-por-gps.md](docs/07-calibragem-por-gps.md).
+
 ## Coisas que valem a pena tentar quebrar
 
 Não é lista de tarefas nem roteiro fechado; é ponto de partida. O chamado pede
@@ -142,12 +152,17 @@ uma pessoa estressando de verdade, e é isso que encontra o que ninguém previu.
 ## Conferência automática
 
 ```bash
-node server/malha-teste.js
+node server/malha-teste.js         # três alvos: o conjunto chega e fica?
+node testes/seguranca.js           # o que acontece quando algo dá errado andando
+node testes/calibragem.js          # a medida pelo GPS acerta a verdade conhecida?
+node testes/corrigir-cpd.js        # CPD errado -> GPS descobre -> aplica -> confere
 ```
 
-Roda três alvos e confere se o conjunto chega e fica. **Não substitui o teste na
-mão** — só garante que o simulador está montado certo antes de alguém gastar
-tempo com ele.
+**Não substituem o teste na mão** — só garantem que o simulador está montado
+certo antes de alguém gastar tempo com ele.
+
+`testes/calibragem.js` roda sozinho, sem servidor. Os outros precisam do
+`npm run dev` de pé.
 
 ## O que este simulador NÃO prova
 
