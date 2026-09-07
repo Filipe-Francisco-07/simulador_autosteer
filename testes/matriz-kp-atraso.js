@@ -6,8 +6,15 @@
 // serve para o campo: diz quanta folga o Kp escolhido deixa.
 const { Piloto } = require('./piloto.js');
 
-const GANHOS = [20, 40, 126];    // 126 e o que estava configurado em 30/08
+// A faixa desceu em 07/09. Ate entao esta matriz rodava com CPD 100, que era o
+// padrao de tela do AOG e nao a maquina: com o CPD real (~19, do batente medido
+// no JD 5078) o mesmo PWM move a roda 5,3x mais rapido em graus por segundo.
+// Planta mais rapida desestabiliza com ganho MENOR, entao a fronteira que
+// interessa esta abaixo do que se media antes — e os numeros publicados com
+// CPD 100 nao valem para o trator.
+const GANHOS = [5, 10, 20, 40];
 const ATRASOS = [0, 40, 75];
+const CPD = 19;
 
 (async () => {
   const p = new Piloto();
@@ -23,7 +30,7 @@ const ATRASOS = [0, 40, 75];
     process.stdout.write('  ' + String(kp).padStart(10) + '  ');
     for (const atraso of ATRASOS) {
       await p.zerar();
-      p.envia('ajustes', { ganhoP: kp, contagensPorGrau: 100, pwmMinimo: 25, pwmAlto: 180 });
+      p.envia('ajustes', { ganhoP: kp, contagensPorGrau: CPD, pwmMinimo: 25, pwmAlto: 180 });
       p.envia('atrasoMotor', atraso);
       await p.espera(400);
       await p.prepararLinha();

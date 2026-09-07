@@ -85,3 +85,103 @@ saber o que está acontecendo, sem mexer no comportamento.
 node testes/trava-presa.js bancada     # com o ESP32
 node testes/trava-presa.js simulado    # sem a placa
 ```
+
+---
+
+# Atualização 2026-09-07 — o Pedro mexeu nisso
+
+O commit `fc50b61 fix(firmware): tira as travas que exigiam terminal no meio da
+lavoura` reescreveu a lógica. **Tudo acima continua valendo como registro do que
+foi medido em 05/09, mas não descreve mais o firmware de hoje.**
+
+## O que mudou
+
+A `engateDecidir` de borda de descida saiu. Agora a trava mora em
+`ControleDirecao::receber`, e o que solta ela é um **nível**, não uma borda:
+
+```cpp
+if (!pedido) {
+    ligado = false; pwm = 0;
+    if (!viuDesligado) { viuDesligado = true; inicioDesligado = agora; }
+    reconhecido = (agora - inicioDesligado) >= 250
+        && hbFresco(agora) && referencia && limitesValidos()
+        && !(erroMotor & 0xFFFE) && corrente < limiar;
+    if (reconhecido) { trava = false; falha = Nenhuma; }
+}
+```
+
+Ou seja: **250 ms com o piloto desligado e o módulo saudável** e a trava cai
+sozinha. Não precisa mais que o AOG tenha mandado `false` naquele boot
+específico.
+
+O que isso resolve das duas dores anotadas acima:
+
+| dor de 05/09 | hoje |
+|---|---|
+| ferramenta que engata direto encontra módulo morto | some: basta 250 ms de piloto desligado, e nenhuma ferramenta engata no primeiro quadro |
+| operador não sabe por que parou | resolvido: existe **código de falha** |
+
+## A terceira recomendação virou código
+
+A recomendação que ficou como "decisão do Pedro" — *reportar o estado num campo
+de diagnóstico* — foi implementada. O byte 12 do PGN 253, que aparece no campo
+**PWM** da tela Steer Settings do AgOpenGPS, agora tem dois usos:
+
+- **acionando** → o PWM de verdade;
+- **parado** → o **código do motivo**.
+
+| código | significa |
+|---|---|
+| 0 | nenhuma |
+| 1 | sem zero de partida |
+| 2 | salto de encoder |
+| 3 | sem heartbeat do motor |
+| 4 | sem PGN do AOG |
+| 5 | sobrecorrente |
+| 6 | motor em erro |
+| 7 | transporte CAN |
+| 8 | ajuste trocado ou recusado |
+| 9 | fora do curso |
+| 10 | abaixo da velocidade mínima |
+
+> **Cuidado com o código 8.** Ele não quer dizer só "recusei o ajuste": o mesmo
+> código marca o caminho normal de *"o ajuste mudou, então desengatei por
+> segurança"*. Aqui em 07/09 ele apareceu logo depois de zerar as rodas e mandou
+> caçar um defeito que não existia. No simulador o rótulo é
+> **"ajuste trocado ou recusado"** por causa disso.
+
+Até 06/09 esse mesmo byte, com o motor parado, devolvia o **CPD em uso**. Quem
+tiver anotação antiga de teste com esse campo precisa saber qual firmware estava
+gravado para interpretar o número.
+
+## O que passou a ser exigido no arranque
+
+Novidade do commit `4b0868c feat(firmware): zero de partida ao energizar`: o
+módulo **nasce sem referência** (`falha = 1`, sem zero de partida) e centra
+sozinho no primeiro instante em que encontrar, ao mesmo tempo:
+
+- piloto desligado,
+- velocidade **zero**,
+- heartbeat do Keya fresco,
+- PGN do AOG recente,
+- motor sem erro.
+
+Consequência prática que vale anotar para o campo: **se a placa reiniciar com o
+trator andando, ela não recentra até o trator parar.** O código na tela vai ser
+1. Parar e esperar resolve; não precisa de terminal.
+
+## O que isso quebrou no simulador (e foi consertado)
+
+O simulador só mandava o PGN 252 quando alguém mexia num controle da tela.
+Com o firmware novo isso ficou visível: o módulo rodava com os padrões **dele**
+(CPD 100, Kp 40, PWM alto 162) enquanto o painel exibia os valores do servidor,
+e ninguém via a diferença — toda medida de sintonia feita assim media um ganho
+diferente do mostrado. Agora o servidor manda os ajustes no arranque e depois de
+cada reinício, como o AgIO faz.
+
+## Como repetir
+
+```bash
+node testes/trava-presa.js simulado    # sem a placa
+node testes/trava-presa.js bancada     # com o ESP32 e o firmware de bancada
+```

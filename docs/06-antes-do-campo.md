@@ -35,20 +35,45 @@ node testes/seguranca.js simulado
 
 ## 2. O ajuste que os testes recomendam
 
-### Kp: comece em 20, não em 40
+### Kp — a tabela antiga foi **invalidada em 07/09**
 
-Medido aqui (erro médio nos últimos 10 s, seguindo a passada):
+> ⚠️ **Os números abaixo foram medidos com o simulador calibrado errado.**
+> A matriz rodava com CPD 100, que é o padrão de tela do AgOpenGPS e **não** a
+> máquina. O batente que o Pedro mediu no JD 5078 em 05/09 (760 contagens do
+> centro, ~40° de roda) implica CPD ≈ **19**. Com CPD 19 o mesmo PWM move a roda
+> **5,3x mais rápido** em graus por segundo.
+>
+> Planta mais rápida desestabiliza com ganho **menor**. Ou seja: a recomendação
+> "Kp 20" saiu de uma máquina muito mais mansa que a real, e o Kp seguro no
+> trator provavelmente está **abaixo** disso.
 
-| Kp | sem atraso | 40 ms de atraso | 75 ms |
+Tabela antiga, mantida só como registro (**não use para configurar**):
+
+| Kp | sem atraso | 40 ms | 75 ms |
 |---|---|---|---|
-| **20** | 10 cm | 9 cm | **4 cm** — firme em tudo |
-| 40 | 2 cm | **1,10 m** ✗ | 47 cm |
-| 126 | **48 cm** ✗ | 1,03 m ✗ | 1,14 m ✗ |
+| 20 | 10 cm | 9 cm | 4 cm |
+| 40 | 2 cm | 1,10 m ✗ | 47 cm |
+| 126 | 48 cm ✗ | 1,03 m ✗ | 1,14 m ✗ |
 
-- **Kp 126 não estabiliza nem com atraso zero.** Era o valor gravado em 30/08 —
-  o Pedro já tinha alertado na análise, e aqui está o número.
-- Kp 40 dá o melhor acabamento, mas não perdoa atraso nenhum.
-- Kp 20 é o robusto. Subir depois que a linha estiver limpa, um passo por vez.
+O único item que **sobrevive**: **Kp 126 não estabiliza em condição nenhuma**, e
+era o valor gravado em 30/08. Com a planta mais rápida ele fica pior ainda.
+
+### O que ainda falta para dar um número confiável
+
+A velocidade do motor a pleno PWM **nunca foi medida**. Ela entra direto na
+conta e hoje é chute (4 voltas/s no simulador). Enquanto ela for chute, qualquer
+matriz de Kp daqui é ordem de grandeza, não recomendação.
+
+Medir é rápido e vale mais que um dia de simulação:
+
+1. Trator parado, motor no volante, console do Keya
+   (`pio run -e console -t upload`).
+2. Manda PWM cheio num sentido e **cronometra batente a batente**.
+3. Anota também as contagens percorridas — isso confirma o CPD por um caminho
+   independente do GPS.
+
+Com esse número, `node testes/matriz-kp-atraso.js` passa a valer, e ele já roda
+com CPD 19.
 
 ### Os outros
 
@@ -62,15 +87,23 @@ Medido aqui (erro médio nos últimos 10 s, seguindo a passada):
 
 ## 3. Se o piloto não engatar: faça isto ANTES de qualquer diagnóstico
 
-**Desligue o piloto na tela e ligue de novo.**
+**1. Olhe o campo PWM na tela Steer Settings.** Com o motor parado ele não é
+PWM: é o **código do motivo**. A tabela está na
+[nota da trava](05-trava-de-seguranca.md#a-terceira-recomendação-virou-código).
+O mais comum na partida é **1 — sem zero de partida**.
 
-A trava de segurança do firmware só solta na borda de descida do pedido
-([medido na placa](05-trava-de-seguranca.md)). Se ela armou — por override
-legítimo ou por um pico de corrente — o piloto **para de responder ao botão** e
-parece defeito. Um ciclo desliga/liga resolve.
+**2. Se o código for 1: pare o trator.** Desde 07/09 o módulo centra sozinho,
+mas só com o trator **parado**, piloto desligado e o motor respondendo. Se a
+placa reiniciou andando, ela espera. Parar resolve — não precisa de terminal.
 
-Foi isso que derrubou o AogFake em 01/09, e o mesmo AogFake passou 10/10 aqui
-depois, com a placa recém-reiniciada.
+**3. Se não for isso, desligue o piloto na tela e ligue de novo.** A trava de
+segurança agora cai sozinha depois de 250 ms com o piloto desligado, então isso
+é bem menos provável que era em 05/09 — mas continua sendo o primeiro
+movimento, porque custa dois segundos.
+
+> Até 06/09 a trava só soltava na borda de descida do pedido, e um ciclo
+> desliga/liga era **obrigatório**. Foi isso que derrubou o AogFake em 01/09.
+> O commit `fc50b61` de 07/09 mudou isso.
 
 ## 4. O que está provado
 

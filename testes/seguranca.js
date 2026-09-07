@@ -76,15 +76,20 @@ caso('encoder atravessa o estouro', 'o acumulador perde a conta ao passar de 0xF
 });
 
 caso('encoder atravessa girando', 'girar muito faz o estimado DERIVAR da roda?', async (p) => {
-  // O que importa nao e o valor da diferenca — e se ela MUDA. Um desvio fixo e
-  // so o zero fora do lugar, e o botao "Zerar rodas" existe para isso. Deriva
-  // seria o encoder perdendo conta, e ai o piloto esterca para o lugar errado.
+  // O que importa nao e o valor da diferenca — e se ela MUDA de uma passada
+  // para a outra NO MESMO LADO. Um desvio fixo e so o zero fora do lugar, e o
+  // botao "Zerar rodas" existe para isso.
+  //
+  // A versao anterior comparava batente direito com batente esquerdo em
+  // sequencia e acusava 64,8 graus de "deriva" que era so a diferenca entre os
+  // dois lados — o teste falhava sem defeito nenhum embaixo. Cada lado agora e
+  // comparado consigo mesmo.
   p.envia('piloto');            // sai o piloto: quem gira e o operador
   await p.espera(600);
   p.envia('wasZero');           // parte do zero, como manda a rotina de partida
   await p.espera(900);
 
-  let primeira = null, maiorVariacao = 0;
+  const porLado = { dirOn: [], esqOn: [] };
   for (let i = 0; i < 8; i++) {
     const tecla = i % 2 ? 'esqOn' : 'dirOn';
     p.envia(tecla, true);
@@ -92,13 +97,18 @@ caso('encoder atravessa girando', 'girar muito faz o estimado DERIVAR da roda?',
     p.envia(tecla, false);
     await p.espera(400);
     const a = p.amostra();
-    const d = a.estimado - a.roda;
-    if (primeira === null) primeira = d;
-    maiorVariacao = Math.max(maiorVariacao, Math.abs(d - primeira));
+    porLado[tecla].push(a.estimado - a.roda);
+  }
+  let maiorVariacao = 0;
+  const partes = [];
+  for (const [lado, vs] of Object.entries(porLado)) {
+    const v = Math.max(...vs) - Math.min(...vs);
+    maiorVariacao = Math.max(maiorVariacao, v);
+    partes.push(`${lado === 'dirOn' ? 'direita' : 'esquerda'} variou ${v.toFixed(2)}°`);
   }
   return {
     ok: maiorVariacao < 1,
-    detalhe: `8 giros de batente a batente: a diferenca variou ${maiorVariacao.toFixed(2)}°`,
+    detalhe: `4 idas a cada batente: ${partes.join(' · ')}`,
   };
 });
 
