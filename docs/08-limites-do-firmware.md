@@ -157,6 +157,69 @@ sintonia valer alguma coisa.
 
 ---
 
+## Limite 3 — o offset guardado pelo AgOpenGPS volta a deslocar o zero
+
+Este é o mais perigoso dos três, porque é **exatamente o defeito que perdeu o
+teste de campo de 30/08**, e ele voltou.
+
+O ângulo do módulo é `(contagens - centro + offsetDirecao) / CPD`. O
+`offsetDirecao` vem no PGN 252 e **serve** para deslocar o zero — é assim que o
+botão "zerar rodas" funciona. O problema não é ele agir; é um offset **guardado
+de outra sessão** agir de novo.
+
+O encoder nasce zerado a cada energizada, então um offset que fazia sentido no
+referencial do boot anterior não faz nenhum no boot seguinte.
+
+Medido (`node testes/partida.js`), com o valor real do dump de 30/08:
+
+```
+0. arranque limpo:                     estimado 0,00° · roda 0,00°
+1. chega PGN 252 com offsetDirecao 283 → estimado 14,89° · roda 0,00°
+```
+
+283 ÷ 19 = 14,89°. **Sem código de falha, sem nada na tela.** O módulo passa a
+achar que a roda está 15° virada quando ela está reta.
+
+### É uma corrida, e os dois lados acontecem
+
+- PGN 252 chegando **antes** da centragem: absorvido, porque `confirmarCentro()`
+  faz `centro = acumulado + offset` e a conta se cancela.
+- PGN 252 chegando **depois**: desloca o zero, calado.
+
+Na partida o AgIO manda o 252 assim que acha o módulo, e o módulo centra assim
+que vê velocidade zero com heartbeat fresco. As duas ordens são possíveis.
+
+Pior: **qualquer mexida na tela Steer Settings reenvia o 252.** Então o
+deslocamento pode aparecer no meio do trabalho, não só na partida.
+
+E o gatilho é o uso normal: o "zerar rodas" grava o ajuste no perfil do
+AgOpenGPS, então em uso normal o offset **não é zero**.
+
+### O que o código diz
+
+O firmware calcula a variável que trataria isso e não a usa:
+
+```cpp
+const bool mudouZero = a.offsetDirecao != controle.ajustes.offsetDirecao;
+```
+
+`mudouZero` aparece uma vez em `main.cpp` e **nunca é lida**. A intenção está
+escrita; a ação não. Junto com ela, `ancorarOffset`, `engateDecidir` e
+`bloqueioExpirou` ficaram órfãs no `logica_direcao.h` depois da reescrita de
+07/09 — e a `ancorarOffset` era justamente a âncora que resolvia isto antes
+(commit `eb58f4f`).
+
+**Não mexi no firmware.** É decisão do Pedro, e há mais de um caminho: reancorar
+o centro quando o offset mudar (o que `mudouZero` sugere), ou ignorar o
+`offsetDirecao` do AOG e manter o zero só pela centragem.
+
+### Enquanto não for resolvido
+
+Zerar o **Steer Zero / WAS offset** na tela do AgOpenGPS antes de sair para o
+campo, e conferir na tela que o ângulo nasce em zero com as rodas retas.
+
+---
+
 ## Um defeito meu, no caminho
 
 A matriz de 08/09 também estava contaminada por um erro do simulador. O atraso

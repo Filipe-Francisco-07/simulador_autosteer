@@ -103,6 +103,14 @@ com CPD 19.
 
 ## 3. Se o piloto não engatar: faça isto ANTES de qualquer diagnóstico
 
+**0. Antes de tudo: zere o Steer Zero / WAS offset na tela do AgOpenGPS.**
+Um offset guardado de outra sessão desloca o zero do módulo em `offset/CPD`
+graus **em silêncio** — com o valor real de 30/08 (283) e CPD 19 são **14,89°**
+de erro sem nada na tela. É o defeito que perdeu aquele dia de campo e ele
+voltou na reescrita de 07/09. Detalhes e evidência em
+[08-limites-do-firmware.md](08-limites-do-firmware.md#limite-3--o-offset-guardado-pelo-agopengps-volta-a-deslocar-o-zero).
+Confira na tela que o ângulo nasce em zero com as rodas retas.
+
 **1. Olhe o campo PWM na tela Steer Settings.** Com o motor parado ele não é
 PWM: é o **código do motivo**. A tabela está na
 [nota da trava](05-trava-de-seguranca.md#a-terceira-recomendação-virou-código).
