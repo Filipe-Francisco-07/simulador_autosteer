@@ -540,7 +540,19 @@ wss.on('connection', (ws) => {
 // a diferenca. Toda medida de sintonia feita antes disto media outro ganho que
 // nao o mostrado. Um atraso curto porque o modulo precisa terminar o setup().
 function mandarAjustesQuandoSubir() {
-  setTimeout(() => { mandarAjustes(); }, 300);
+  setTimeout(() => { mandarAjustes(); mandarConfig(); }, 300);
+}
+
+// Configuracao do trator (PGN 251). O AgIO manda os dois quadros, 252 e 251, e
+// o simulador so mandava o 252 — entao limiar de corrente, velocidade minima e
+// os bits de configuracao nunca foram exercitados aqui. set0 = 56 e o padrao de
+// fabrica do AgOpenGPS e o que os perfis do trator mandam.
+let configAog = { set0: 56, maxPulse: 0, minSpeedKmh: 0, set1: 0 };
+
+function mandarConfig() {
+  const quadro = aog.steerConfig(configAog);
+  if (modo === 'placa') placa.enviar(quadro);
+  else manda('S ' + quadro.toString('hex').toUpperCase());
 }
 
 function mandarAjustes() {
@@ -568,6 +580,7 @@ function aplicarComando(c) {
     case 'reverseOn':      isReverseOn = !!c.valor; break;
     case 'steerInReverse': isSteerInReverse = !!c.valor; break;
     case 'ajustes':        Object.assign(ajustesAog, c.valor); mandarAjustes(); break;
+    case 'config':         Object.assign(configAog, c.valor); mandarConfig(); break;
     // Aplica no AOG o que o GPS mediu. E ACAO DO OPERADOR de proposito: o
     // calibrador mede sozinho o tempo todo, mas mexer no ajuste com o trator
     // andando muda o comportamento do piloto, e isso ninguem faz sem mandar.
@@ -689,6 +702,7 @@ function aplicarComando(c) {
       isReverseOn = true; isSteerInReverse = false;
       ajustesAog = { ganhoP: 40, pwmAlto: 180, pwmBaixo: 30, pwmMinimo: 25,
                      contagensPorGrau: 19, offsetDirecao: 0, ackerman: 100 };
+      configAog = { set0: 56, maxPulse: 0, minSpeedKmh: 0, set1: 0 };
       contadores = { pgn253: 0, canCmd: 0 };
       ultimoPgn253 = null;
       filaHeartbeat.length = 0;   // nada em voo atravessa um reinicio

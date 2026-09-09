@@ -66,6 +66,43 @@ function helloLegado() {
   return Buffer.from([0x80, 0x81, 127, 200, 3, 56, 0, 0, 0x47]);
 }
 
+// PGN 251 — a configuracao do trator que o AgIO manda junto com os ajustes.
+//
+// O simulador NUNCA mandava este quadro, entao nada aqui exercitava o limiar de
+// corrente, a velocidade minima nem o tratamento dos bits de configuracao — e
+// esses bits custaram dias de campo, segundo os comentarios do proprio firmware.
+//
+// Mapa do set0, conferido pelo Pedro em FormSteer.cs:
+//   bit0 InvertWAS | bit1 InvertRelays | bit2 InvertSteer | bit3 WAS "Single"
+//   bit4 driver "Cytron" | bit5 engate por "Switch" | bit6 por "Button"
+//   bit7 encoder de pulsos
+// 56 (bits 3, 4 e 5) e o PADRAO DE FABRICA do AgOpenGPS e o que os perfis do
+// trator mandam — recusa-lo deixava o modulo em Configuracao para sempre.
+//
+// maxPulse so quer dizer limiar de corrente quando ha sensor de carga marcado
+// (set1 bit1 = pressao, bit2 = corrente). Sem sensor ele e contagem de pulso de
+// encoder, e ler isso como amperes dava um limiar de 3 sem ninguem pedir.
+// UNIDADE DA VELOCIDADE MINIMA: o parametro aqui e em km/h, e o quadro leva
+// DECIMOS, porque e isso que o AgOpenGPS manda:
+//
+//   FormSteer.cs:1184
+//   mf.p_251.pgn[mf.p_251.minSpeed] = (byte)(setAS_minSteerSpeed * 10);
+//
+// Ou seja o campo tem a mesma unidade da velocidade do PGN 254, e a comparacao
+// do firmware (`velocidade < velocidadeMinima`) esta certa. Cheguei a suspeitar
+// de mistura de unidades no firmware porque meu teste mandava o valor cru; a
+// fonte do AOG desmentiu. Fica explicito aqui para nao suspeitar de novo.
+function steerConfig({ set0 = 56, maxPulse = 0, minSpeedKmh = 0, set1 = 0 } = {}) {
+  const b = Buffer.alloc(14);
+  b[0] = 0x80; b[1] = 0x81; b[2] = 0x7F; b[3] = 0xFB; b[4] = 8;
+  b[5] = set0 & 0xFF; b[6] = maxPulse & 0xFF;
+  b[7] = Math.max(0, Math.min(255, Math.round(minSpeedKmh * 10))) & 0xFF;
+  b[8] = set1 & 0xFF;
+  b[9] = 0; b[10] = 0; b[11] = 0; b[12] = 0;
+  b[13] = crc(b);
+  return b;
+}
+
 // PGN 253 — a resposta do modulo.
 //
 // ATENCAO: o byte 12 NAO e so o PWM. O firmware faz (main.cpp, no envio do 253):
@@ -143,5 +180,5 @@ function separarQuadros(bytes) {
 }
 
 module.exports = {
-  nomeDaFalha, FALHAS, steerData, steerSettings, hello, helloLegado, parseFromAutoSteer, separarQuadros, crc,
+  nomeDaFalha, FALHAS, steerData, steerSettings, steerConfig, hello, helloLegado, parseFromAutoSteer, separarQuadros, crc,
                    velocidadeDoComandoKeya };

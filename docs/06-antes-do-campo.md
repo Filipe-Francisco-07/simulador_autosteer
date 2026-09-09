@@ -43,6 +43,9 @@ node testes/calibragem.js
 
 # 9. o modulo aparece no AgIO? — nao usa servidor
 node testes/descoberta.js
+
+# 10. a configuracao do trator (PGN 251) — nao usa servidor
+node testes/configuracao.js
 ```
 
 ⚠️ **Feche o AgIO antes de tudo** — ele segura a porta serial.
@@ -56,6 +59,7 @@ node testes/descoberta.js
 | `testes/seguranca.js simulado` | 9 de 9 | não |
 | `testes/calibragem.js` | 9 de 9 | não |
 | `testes/descoberta.js` | 5 de 5 | não |
+| `testes/configuracao.js` | 5 de 5 | não |
 | `testes/corrigir-cpd.js` | passa | não |
 | `testes/matriz-kp-atraso.js` | roda, **não conclui** | não |
 | `testes/partida.js` | **FALHA** — é o defeito do offset | não |
