@@ -1,11 +1,19 @@
-# Dois limites duros do firmware, e por que a sintonia de Kp ainda não fecha
+# Três limites duros do firmware, e por que a sintonia de Kp ainda não fecha
 
 **Data:** 2026-09-09. Tudo medido no **simulado**, com o firmware real rodando
 no PC. A placa não estava disponível.
 
 Isto saiu de investigar por que a matriz de Kp de 08/09 deu ~1 m de erro em
-quase toda célula. Não era o ganho. Eram dois limites do firmware que nada tem a
-ver com controle, e um defeito meu no simulador.
+quase toda célula. Não era o ganho. Eram limites do firmware que nada têm a ver
+com controle, mais um defeito meu no simulador.
+
+| | O quê | Gravidade |
+|---|---|---|
+| **Limite 1** | atraso de heartbeat acima de ~30 ms e o engate vira sorte | atrapalha a bancada; no trator não deve morder |
+| **Limite 2** | motor acima de ~7 voltas/s custa a **referência**, que só volta com reboot | risco real, **depende de uma medição que falta** |
+| **Limite 3** | o offset guardado pelo AgOpenGPS desloca o zero, calado | **é o defeito que perdeu 30/08, e ele voltou** |
+
+Se for ler só um, leia o **Limite 3**.
 
 ---
 
