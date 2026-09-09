@@ -38,13 +38,32 @@ function steerSettings({ ganhoP = 40, pwmAlto = 180, pwmBaixo = 30, pwmMinimo = 
 }
 
 // PGN 200 — o "quem esta ai" que o AgIO manda para descobrir modulos.
+//
+// TAMANHO IMPORTA. Desde 07/09 o firmware valida o quadro inteiro:
+// `n == dados + 6`, fonte, PGN, o campo de tamanho e o CRC. Com dados = 3 o
+// quadro tem 9 bytes, nao 11.
+//
+// A versao anterior daqui montava 11 bytes e era DESCARTADA em silencio — o
+// modulo nunca respondia e o simulador nunca exercitou o caminho de descoberta,
+// que e exatamente o que o commit 3d87c18 ("modulo nao some do AgIO") existe
+// para consertar. Testar o caminho de descoberta com um quadro que o firmware
+// rejeita nao testa nada.
 function hello() {
-  const b = Buffer.alloc(11);
+  const b = Buffer.alloc(9);
   b[0] = 0x80; b[1] = 0x81; b[2] = 0x7F; b[3] = 200; b[4] = 3;
   b[5] = 0; b[6] = 0; b[7] = 0;
-  b[8] = 0; b[9] = 0;
-  b[10] = crc(b);
-  return b.subarray(0, 9 + 1 + 1);
+  b[8] = crc(b);
+  return b;
+}
+
+// O hello que o AgIO 6.8.5 manda de verdade.
+//
+// Ele nao recalcula a soma: manda 0x47 fixo, que NAO e o CRC destes bytes. O
+// firmware abre uma excecao exata e somente para este quadro (aogHelloValido),
+// porque recusa-lo faria o modulo sumir da tela do AgIO. Vale ter os dois aqui:
+// o correto e o que o mundo real manda.
+function helloLegado() {
+  return Buffer.from([0x80, 0x81, 127, 200, 3, 56, 0, 0, 0x47]);
 }
 
 // PGN 253 — a resposta do modulo.
@@ -124,5 +143,5 @@ function separarQuadros(bytes) {
 }
 
 module.exports = {
-  nomeDaFalha, FALHAS, steerData, steerSettings, hello, parseFromAutoSteer, separarQuadros, crc,
+  nomeDaFalha, FALHAS, steerData, steerSettings, hello, helloLegado, parseFromAutoSteer, separarQuadros, crc,
                    velocidadeDoComandoKeya };

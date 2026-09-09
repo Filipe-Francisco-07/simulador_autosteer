@@ -40,6 +40,9 @@ node testes/partida.js
 
 # 8. o metodo de calibragem por GPS acerta a verdade conhecida — nao usa servidor
 node testes/calibragem.js
+
+# 9. o modulo aparece no AgIO? — nao usa servidor
+node testes/descoberta.js
 ```
 
 ⚠️ **Feche o AgIO antes de tudo** — ele segura a porta serial.
@@ -52,6 +55,7 @@ node testes/calibragem.js
 | `server/malha-teste.js` | 3 de 3 | não |
 | `testes/seguranca.js simulado` | 9 de 9 | não |
 | `testes/calibragem.js` | 9 de 9 | não |
+| `testes/descoberta.js` | 5 de 5 | não |
 | `testes/corrigir-cpd.js` | passa | não |
 | `testes/matriz-kp-atraso.js` | roda, **não conclui** | não |
 | `testes/partida.js` | **FALHA** — é o defeito do offset | não |

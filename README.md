@@ -156,6 +156,7 @@ node server/malha-teste.js         # três alvos: o conjunto chega e fica?
 node testes/seguranca.js           # o que acontece quando algo dá errado andando
 node testes/calibragem.js          # a medida pelo GPS acerta a verdade conhecida?
 node testes/corrigir-cpd.js        # CPD errado -> GPS descobre -> aplica -> confere
+node testes/descoberta.js          # o modulo responde ao "quem esta ai" do AgIO?
 ```
 
 **Não substituem o teste na mão** — só garantem que o simulador está montado
