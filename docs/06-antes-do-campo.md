@@ -27,11 +27,46 @@ dotnet run --project tools/aog_fake -- COM3
 cd ../simulador_autosteer
 node server/estresse-teste.js
 
-# 5. seguranca com o trator andando — 8 cenarios
+# 5. a malha fecha nos tres alvos — precisa do servidor NAO estar rodando
+node server/malha-teste.js
+
+# --- os de baixo precisam do servidor de pe: npm run dev noutro terminal ---
+
+# 6. seguranca com o trator andando — 9 cenarios
 node testes/seguranca.js simulado
+
+# 7. a rotina de partida e o offset herdado  <<< FALHA HOJE, DE PROPOSITO
+node testes/partida.js
+
+# 8. o metodo de calibragem por GPS acerta a verdade conhecida — nao usa servidor
+node testes/calibragem.js
 ```
 
 ⚠️ **Feche o AgIO antes de tudo** — ele segura a porta serial.
+
+### O que cada um cobre, e o que não roda hoje
+
+| roteiro | estado em 09/09 | precisa da placa |
+|---|---|---|
+| `server/estresse-teste.js` | 6 de 6 | não |
+| `server/malha-teste.js` | 3 de 3 | não |
+| `testes/seguranca.js simulado` | 9 de 9 | não |
+| `testes/calibragem.js` | 9 de 9 | não |
+| `testes/corrigir-cpd.js` | passa | não |
+| `testes/matriz-kp-atraso.js` | roda, **não conclui** | não |
+| `testes/partida.js` | **FALHA** — é o defeito do offset | não |
+| `testes/trava-presa.js simulado` | roda, informativo | não |
+| `testes/re.js` | roda, informativo | não |
+| `testes/latencia.js` | **não roda** | sim (COM3) |
+| espelho / bancada | **não roda** | sim |
+
+O `partida.js` falhar é intencional: ele agora falha de verdade no defeito do
+offset herdado ([Limite 3](08-limites-do-firmware.md)). Quando isso for
+resolvido no firmware, ele volta a passar sozinho.
+
+> **Nada foi rodado na placa desde 06/09.** Toda a bateria acima é simulado. A
+> reescrita do firmware de 07/09 e as correções de 08 e 09/09 não passaram por
+> hardware nenhum.
 
 ## 2. O ajuste que os testes recomendam
 
