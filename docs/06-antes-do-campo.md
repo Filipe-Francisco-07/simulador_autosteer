@@ -75,6 +75,15 @@ Medir é rápido e vale mais que um dia de simulação:
 Com esse número, `node testes/matriz-kp-atraso.js` passa a valer, e ele já roda
 com CPD 19.
 
+> **A primeira rodada com CPD 19 (08/09) foi descartada, não publicada.** Ela
+> devolveu ~1 m de erro em quase toda a matriz, o que se leria como "todos os
+> ganhos são ruins". Investigando: em várias células **o piloto nem chegou a
+> ficar engatado**, e o teste media a posição de um trator sem piloto e chamava
+> isso de "não estabiliza". O teste agora marca essas células como `solto` em
+> vez de inventar um número, mas a causa do desengate ainda não foi encontrada —
+> aparece só quando as combinações rodam em sequência, não quando se roda uma
+> sozinha. **A matriz continua sem resposta; não configure Kp por ela.**
+
 ### Os outros
 
 | Ajuste | Valor | Por quê |

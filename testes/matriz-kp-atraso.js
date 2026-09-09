@@ -38,8 +38,24 @@ const CPD = 19;
       await p.espera(15000);
 
       const amostras = [];
-      for (let i = 0; i < 8; i++) { await p.espera(500); const a = p.amostra(); if (a) amostras.push(Math.abs(a.xte)); }
+      let ciclosSolto = 0;
+      for (let i = 0; i < 8; i++) {
+        await p.espera(500);
+        const a = p.amostra();
+        if (!a) continue;
+        if (!a.piloto) ciclosSolto++;
+        amostras.push(Math.abs(a.xte));
+      }
       p.parar();
+      // Piloto solto NAO e "nao estabiliza": e celula sem medida nenhuma.
+      // Sem esta checagem o teste devolvia ~1,00 m para uma combinacao que
+      // sequer chegou a engatar, e isso se le como "esse Kp e ruim" — conclusao
+      // inventada. Em 08/09 a matriz inteira saiu assim e quase virou
+      // recomendacao de campo.
+      if (ciclosSolto > amostras.length / 2) {
+        process.stdout.write('  solto'.padStart(9));
+        continue;
+      }
       const media = amostras.reduce((s, v) => s + v, 0) / (amostras.length || 1);
       const marca = media < 0.2 ? ' ' : media < 0.5 ? '~' : '!';
       process.stdout.write((media.toFixed(2) + marca).padStart(9));
