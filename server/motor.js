@@ -46,6 +46,21 @@ class MotorKeya {
     this.correnteMao = 11.0;          // corrente com a mao no volante
     this.maoNoVolante = false;
     this.batenteGraus = 40;           // fim de curso mecanico
+
+    // FOLGA (zona morta mecanica) entre o motor e a roda, em graus de roda.
+    //
+    // Nasce em 0 — ou seja, desligada, e nada muda ate alguem ligar. Existe
+    // porque em 09/09 o simulador aprovou Kp 126 com 1 mm de erro, e esse mesmo
+    // valor NAO estabilizou no trator em 30/08. Um simulador que aprova um
+    // ganho ja reprovado no campo e pior que inutil, entao o que falta de
+    // fisica precisa ficar visivel em vez de escondido.
+    //
+    // Folga e a suspeita mais provavel: um orbitrol tem um trecho em que girar
+    // o motor nao move a roda, e e exatamente isso que produz ciclo-limite com
+    // ganho alto — o modulo corrige, nada acontece, ele corrige mais, e a roda
+    // salta. NAO E MEDIDA. Ver docs/08-o-que-falta-no-modelo.md.
+    this.folgaGraus = 0;
+    this.posicaoNaFolga = 0;          // onde estamos dentro da zona morta
     this.travado = false;             // motor fisicamente travado
     this.noBatente = false;           // encostou no fim de curso neste ciclo
     // Velocidade do motor a pleno. NAO E MEDIDA — ver nota em passo().
@@ -114,7 +129,10 @@ class MotorKeya {
     const deltaGrausRoda = this.sentidoMontagem
                          * (deltaContagens / this.contagensPorGrauReal)
                          * (1 - this.escorregamento);
-    const novoAngulo = this.anguloRodasGraus + deltaGrausRoda;
+    // A folga fica ENTRE o motor e a roda: o encoder conta o giro inteiro, mas
+    // a roda so anda depois que a folga foi vencida. Por isso ela e aplicada
+    // aqui e nao em deltaContagens.
+    const novoAngulo = this.anguloRodasGraus + this.venceFolga(deltaGrausRoda);
 
     // No fim de curso o motor NAO continua girando solto: ele esta preso a
     // coluna de direcao, entao trava junto e a corrente sobe. Deixar o encoder
@@ -141,6 +159,25 @@ class MotorKeya {
     // Escorregamento do orbitrol: o motor gira mais do que a roda anda. Aqui o
     // encoder conta o giro do MOTOR — e por isso que ele diverge da roda.
     this.posicaoMotor += deltaContagens;
+  }
+
+  // Consome a folga antes de deixar a roda andar. Devolve quanto sobrou para a
+  // roda depois de vencida a zona morta.
+  venceFolga(deltaGrausRoda) {
+    if (!(this.folgaGraus > 0)) return deltaGrausRoda;
+    const meia = this.folgaGraus / 2;
+    this.posicaoNaFolga += deltaGrausRoda;
+    if (this.posicaoNaFolga > meia) {
+      const sobra = this.posicaoNaFolga - meia;
+      this.posicaoNaFolga = meia;
+      return sobra;
+    }
+    if (this.posicaoNaFolga < -meia) {
+      const sobra = this.posicaoNaFolga + meia;
+      this.posicaoNaFolga = -meia;
+      return sobra;
+    }
+    return 0;    // ainda dentro da folga: o motor gira e a roda nao anda
   }
 
   correnteAtual() {

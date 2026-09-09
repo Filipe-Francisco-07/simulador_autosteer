@@ -64,6 +64,12 @@ A velocidade do motor a pleno PWM **nunca foi medida**. Ela entra direto na
 conta e hoje é chute (4 voltas/s no simulador). Enquanto ela for chute, qualquer
 matriz de Kp daqui é ordem de grandeza, não recomendação.
 
+Medir é rápido e vale mais que um dia de simulação — e desde 09/09 essa medição
+destrava **duas** coisas: além da sintonia, ela diz se o motor real passa do
+teto de velocidade acima do qual o firmware perde a referência
+(~7 voltas/s com `pwmAlto` 180). Perder a referência no campo exige religar a
+placa. Ver [08-limites-do-firmware.md](08-limites-do-firmware.md).
+
 Medir é rápido e vale mais que um dia de simulação:
 
 1. Trator parado, motor no volante, console do Keya
@@ -75,14 +81,15 @@ Medir é rápido e vale mais que um dia de simulação:
 Com esse número, `node testes/matriz-kp-atraso.js` passa a valer, e ele já roda
 com CPD 19.
 
-> **A primeira rodada com CPD 19 (08/09) foi descartada, não publicada.** Ela
-> devolveu ~1 m de erro em quase toda a matriz, o que se leria como "todos os
-> ganhos são ruins". Investigando: em várias células **o piloto nem chegou a
-> ficar engatado**, e o teste media a posição de um trator sem piloto e chamava
-> isso de "não estabiliza". O teste agora marca essas células como `solto` em
-> vez de inventar um número, mas a causa do desengate ainda não foi encontrada —
-> aparece só quando as combinações rodam em sequência, não quando se roda uma
-> sozinha. **A matriz continua sem resposta; não configure Kp por ela.**
+> **A primeira rodada com CPD 19 (08/09) foi descartada, não publicada** — as
+> células mediam um trator com o piloto solto. A causa foi encontrada em 09/09 e
+> são dois tetos do firmware mais um defeito meu no simulador; está tudo em
+> [08-limites-do-firmware.md](08-limites-do-firmware.md).
+>
+> **A matriz continua sem resposta, mas agora por um motivo conhecido.** Com a
+> calibragem certa ela diz "quanto maior o ganho, melhor" e aprova **Kp 126 com
+> 1 mm de erro** — o mesmo Kp que não estabilizou no trator em 30/08. Falta
+> física no modelo. **Não configure Kp por ela.**
 
 ### Os outros
 

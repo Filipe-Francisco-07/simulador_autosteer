@@ -12,8 +12,21 @@ const { Piloto } = require('./piloto.js');
 // Planta mais rapida desestabiliza com ganho MENOR, entao a fronteira que
 // interessa esta abaixo do que se media antes — e os numeros publicados com
 // CPD 100 nao valem para o trator.
-const GANHOS = [5, 10, 20, 40];
-const ATRASOS = [0, 40, 75];
+const GANHOS = [5, 10, 20, 40, 80];
+// Os atrasos param em 30 ms de proposito, e o motivo NAO e o laco de controle.
+//
+// Medido em 09/09 (6 engates para cada atraso): ate 30 ms engata 6/6; em 40 ms
+// cai para 1/6 e em 75 ms para 0/6. Quem derruba e o guarda de "motor em erro"
+// do firmware, que conta 4 heartbeats seguidos com o motor se dizendo
+// DESABILITADO enquanto o modulo comanda PWM. No engate, os primeiros
+// heartbeats a chegar sao anteriores ao ENABLE e contam; com o transporte
+// atrasando perto de 4 periodos (~96 ms), o modulo desengata sozinho sem
+// defeito nenhum embaixo.
+//
+// Ou seja: acima de ~30 ms nao da para medir ganho, porque nao ha engate para
+// medir — e a celula nao diz nada sobre o Kp. A tolerancia a atraso do conjunto
+// e fixada por esse guarda, nao pelo controle.
+const ATRASOS = [0, 15, 30];
 const CPD = 19;
 
 (async () => {

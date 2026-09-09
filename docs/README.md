@@ -7,6 +7,7 @@
 | [06-antes-do-campo.md](06-antes-do-campo.md) | **comece por aqui na véspera**: o que rodar, que Kp usar, e o que fazer se o piloto não engatar |
 | [05-trava-de-seguranca.md](05-trava-de-seguranca.md) | por que o piloto às vezes para de responder ao botão, e a **tabela dos códigos de falha** que aparecem no campo PWM |
 | [07-calibragem-por-gps.md](07-calibragem-por-gps.md) | medir CPD, centro e sentido de montagem **pelo GPS**, sem sensor na roda |
+| [08-limites-do-firmware.md](08-limites-do-firmware.md) | os dois tetos duros (atraso de heartbeat e velocidade do motor) e por que a sintonia de Kp ainda não fecha |
 
 ## Para entender e usar
 

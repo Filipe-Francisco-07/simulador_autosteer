@@ -405,6 +405,9 @@ setInterval(() => {
         manda('C ' + hb.id + ' ' + hb.hex);
       }
     };
+    // A fila modela um transporte de latencia FIXA. Ela e esvaziada quando a
+    // latencia muda (ver o comando 'atrasoMotor'), entao aqui basta entregar o
+    // que venceu.
     if (atrasoMotorMs > 0) {
       filaHeartbeat.push({ quando: agora + atrasoMotorMs, entrega });
       while (filaHeartbeat.length && filaHeartbeat[0].quando <= agora) filaHeartbeat.shift().entrega();
@@ -455,6 +458,7 @@ function quadroDaTela() {
       habilitado: motor.habilitado,
       corrente: motor.correnteAtual(),
       escorregamento: motor.escorregamento,
+      folgaGraus: motor.folgaGraus,
       contagensPorGrauReal: motor.contagensPorGrauReal,
       maoNoVolante: motor.maoNoVolante,
       travado: motor.travado,
@@ -616,6 +620,7 @@ function aplicarComando(c) {
     case 'motorTravado':     motor.travado = !!c.valor; break;
     case 'motorRespondendo': motorRespondendo = !!c.valor; break;
     case 'escorregamento':   motor.escorregamento = Number(c.valor); break;
+    case 'folga':            motor.folgaGraus = Math.max(0, Number(c.valor)); break;
     case 'cpdReal':          motor.contagensPorGrauReal = Number(c.valor); break;
     case 'correnteMao':      motor.correnteMao = Number(c.valor); break;
     case 'batente':          motor.batenteGraus = Number(c.valor); break;
@@ -623,7 +628,24 @@ function aplicarComando(c) {
     case 'sentidoMontagem':  motor.sentidoMontagem = Number(c.valor); break;
     case 'pularEncoder':     motor.posicaoMotor += Number(c.valor); break;
     case 'velMotor':         motor.voltasPorSegundoMax = Number(c.valor); break;
-    case 'atrasoMotor':      atrasoMotorMs = Math.max(0, Number(c.valor)); break;
+    // Trocar a latencia e trocar de experimento, entao o que estava em voo e
+    // descartado. Sem isto, baixar o atraso (75 -> 0, que e o que a matriz de
+    // Kp faz ao trocar de linha) deixava ~4 snapshots orfaos na fila: o
+    // firmware recebia, logo depois de um heartbeat de 75 ms atras, um
+    // fresquinho — 75 ms de movimento num passo so. Girando o volante a 32
+    // graus/s com CPD 19 sao 45 contagens, acima do teto de 40 do detector de
+    // salto, e o modulo perdia a REFERENCIA, que so volta com reboot. A matriz
+    // inteira de 08/09 saiu contaminada assim.
+    //
+    // Esvaziar abre um vao de heartbeat do tamanho do atraso antigo. Isso e
+    // seguro: o firmware dimensiona o teto de salto pelo tempo decorrido
+    // (limite = 4 + 1800*dt/1000), entao um vao de 75 ms permite 139 contagens,
+    // bem acima das 45 que o vao carrega. No maximo ele desengata por
+    // "sem heartbeat do motor", que e recuperavel — perder a referencia nao e.
+    case 'atrasoMotor':
+      atrasoMotorMs = Math.max(0, Number(c.valor));
+      filaHeartbeat.length = 0;
+      break;
 
     // ---- placa de verdade ----
     case 'listarPortas':
@@ -669,6 +691,7 @@ function aplicarComando(c) {
                      contagensPorGrau: 19, offsetDirecao: 0, ackerman: 100 };
       contadores = { pgn253: 0, canCmd: 0 };
       ultimoPgn253 = null;
+      filaHeartbeat.length = 0;   // nada em voo atravessa um reinicio
       manda('R');
       mandarAjustesQuandoSubir();
       break;
