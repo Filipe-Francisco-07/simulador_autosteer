@@ -34,8 +34,19 @@ function erroDeEscala(a) {
 (async () => {
   const p = new Piloto();
   await p.pronto;
-  p.envia('reiniciar');
-  await p.espera(2500);
+  // 'reset' e o nome da acao no servidor. Isto dizia 'reiniciar', que nao
+  // existe no switch e caia fora sem erro nenhum: o teste NUNCA reiniciava e
+  // herdava o que a sessao anterior tivesse deixado no motor (velocidade,
+  // folga, escorregamento). Passou meses parecendo certo porque so rodava logo
+  // depois de subir o servidor, quando os padroes ja estavam no lugar.
+  await p.zerar();
+  // parametros do motor explicitos: este teste e sobre CPD, e herdar velocidade
+  // ou folga de outro roteiro faz a medida do GPS dizer qualquer coisa.
+  p.envia('velMotor', 4);
+  p.envia('folga', 0);
+  p.envia('escorregamento', 0);
+  p.envia('atrasoMotor', 0);
+  await p.espera(800);
 
   // 1. o mundo: a maquina tem 19 contagens por grau (o que o Pedro mediu).
   p.envia('cpdReal', 19);

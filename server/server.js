@@ -692,6 +692,12 @@ function aplicarComando(c) {
       contadores = { pgn253: 0, canCmd: 0 };
       ultimoPgn253 = null;
       filaHeartbeat.length = 0;   // nada em voo atravessa um reinicio
+      // O calibrador tambem recomeca. Ele nao fazia isso, e as medidas de arco
+      // de um roteiro entravam na conta do seguinte — com outro CPD, outra
+      // velocidade de motor, outra folga. O ajuste da reta ficava misturando
+      // duas maquinas diferentes e devolvia um CPD que nao era de nenhuma das
+      // duas (medido: 29 onde a verdade era 19, com R2 caindo para 0,50).
+      calibrador.reiniciar();
       manda('R');
       mandarAjustesQuandoSubir();
       break;
