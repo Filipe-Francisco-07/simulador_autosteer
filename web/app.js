@@ -414,9 +414,13 @@ ws.onmessage = (ev) => {
   const naPlaca = f.deQuem === 'placa';
   const bancada = naPlaca && m.placa && m.placa.bancada;
   const semLeitura = '<small>—</small>';
+  // O quadro de diagnostico (PGN 239 AP01) chega igual na placa e no simulado,
+  // entao o que antes era tracinho no modo placa agora tem numero de verdade.
+  const dg = m.diagnostico;
   $('mPwm').textContent = f.pwmSaida ?? 0;
   $('mCorrente').innerHTML = naPlaca ? semLeitura : nn(f.correnteMedia || 0) + '<small>A</small>';
-  $('mEncoder').innerHTML = naPlaca ? semLeitura : String(Math.round(f.encoderAcumulado || 0));
+  $('mEncoder').innerHTML = dg ? String(dg.encoderAcumulado)
+    : (naPlaca ? semLeitura : String(Math.round(f.encoderAcumulado || 0)));
   $('mAlvo').innerHTML = nn(g.alvo || 0) + '<small>°</small>';
 
   // Calibragem pelo GPS. Enquanto nao houver passeio suficiente ele diz o que

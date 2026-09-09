@@ -70,6 +70,12 @@ let estadoFirmware = {};
 let pwmRealDaPlaca = 0;      // vem do comando CAN ecoado (so no firmware de bancada)
 let ultimoEnableDaPlaca = 0; // quando a placa mandou o ultimo ENABLE ao motor
 let ultimoPgn253 = null;
+// Ultimo AP01 que o modulo respondeu. E o unico jeito de ver o interior dele
+// sem o firmware de bancada — e no trator e daqui que sai a contagem de encoder
+// que o calibrador por GPS precisa.
+let ultimoDiagnostico = null;
+let marcaDiagnostico = 0;
+let proximoDiagnostico = 0;
 let contadores = { pgn253: 0, canCmd: 0 };
 
 // ---- de onde vem o firmware -----------------------------------------------
@@ -91,6 +97,8 @@ let placaMuda = false;
 const placa = new Placa({
   aoReceberPgn: (quadro) => {
     espelho.registrar('placa', quadro);
+    const d = aog.parseDiagnostico(quadro);
+    if (d && d.crcOk && d.etiqueta === 'AP01') ultimoDiagnostico = { ...d, quando: Date.now() };
     const p = aog.parseFromAutoSteer(quadro);
     ultimoPgnDaPlaca = Date.now();
     if (placaMuda) {
@@ -216,6 +224,8 @@ function tratarSaidaFirmware(l) {
   } else if (m.t === 'serial_tx') {
     for (const q of aog.separarQuadros(Buffer.from(m.hex, 'hex'))) {
       espelho.registrar('simulado', q);
+      const d = aog.parseDiagnostico(q);
+      if (d && d.crcOk && d.etiqueta === 'AP01') ultimoDiagnostico = { ...d, quando: Date.now() };
       const p = aog.parseFromAutoSteer(q);
       if (p) { ultimoPgn253 = p; contadores.pgn253++; }
       transmitir({ t: 'quadro', via: 'serial', hex: q.toString('hex').toUpperCase(), decodificado: p });
@@ -373,8 +383,15 @@ setInterval(() => {
     // porque ele via o acumulador crescer ao contrario do angulo. Com o
     // acumulador do modulo, "invertido" passa a querer dizer o que interessa:
     // a conta que o modulo faz cresce para o lado errado.
-    // No trator este numero vem do quadro de diagnostico AP01 (bytes 24-27).
-    const contagens = estadoFirmware.encoderAcumulado;
+    //
+    // A fonte preferida e o quadro de diagnostico AP01, porque ele funciona
+    // IGUAL na placa com firmware de producao — que e onde isto vai rodar no
+    // trator. O estado do processo so existe no modo simulado, e fica como
+    // reserva para quando a resposta do diagnostico atrasar.
+    const doDiagnostico = ultimoDiagnostico
+      && (agora - ultimoDiagnostico.quando) < 1500
+      ? ultimoDiagnostico.encoderAcumulado : null;
+    const contagens = doDiagnostico != null ? doDiagnostico : estadoFirmware.encoderAcumulado;
     if (contagens != null) {
       calibrador.observarPosicao({
         t: agora,
@@ -426,6 +443,23 @@ setInterval(() => {
     else manda('S ' + quadro.toString('hex').toUpperCase());
   }
 
+  // 5b. pergunta o estado interno ao modulo, 2x por segundo.
+  //
+  // O PGN 253 leva angulo, chaves e UM byte. Tudo o mais — encoder acumulado,
+  // saltos, limites, CPD e Ackerman vigentes, flash — so sai por aqui. Na placa
+  // com firmware de producao era exatamente isso que o painel nao tinha, e
+  // mostrava tracinho.
+  //
+  // NAO perguntar durante o espelho: la o roteiro e quem fala, e um quadro a
+  // mais no fio bagunca a comparacao entre os dois firmwares.
+  if (!espelho.rodando && agora >= proximoDiagnostico) {
+    proximoDiagnostico = agora + 500;
+    marcaDiagnostico = (marcaDiagnostico + 1) & 0xFF;
+    const q = aog.servico(aog.OPS_SERVICO.LER, { marca: marcaDiagnostico });
+    if (naPlaca) placa.enviar(q);
+    else manda('S ' + q.toString('hex').toUpperCase());
+  }
+
   // a placa esta viva? (so avisa uma vez, quando o silencio comeca)
   if (naPlaca && !placaMuda && Date.now() - ultimoPgnDaPlaca > 3000) {
     placaMuda = true;
@@ -447,6 +481,10 @@ function quadroDaTela() {
     // O que o GPS diz do esterçamento, independente do encoder. E a unica
     // leitura da tela que nao vem do modulo: serve justamente para conferir o
     // modulo.
+    // O que o modulo respondeu sobre si mesmo (PGN 239 AP01). Envelhece: se
+    // parar de responder, a tela precisa saber que o numero e velho.
+    diagnostico: ultimoDiagnostico && (Date.now() - ultimoDiagnostico.quando < 3000)
+      ? ultimoDiagnostico : null,
     calibragem: cal.pronto ? {
       ...cal,
       laudo: calibrador.laudo(ajustesAog.contagensPorGrau, estadoFirmware.centro),

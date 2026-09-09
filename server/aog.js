@@ -151,6 +151,93 @@ function parseFromAutoSteer(buf) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Diagnostico: PGN 240 (pergunta) e PGN 239 (resposta)
+//
+// O firmware responde com o ESTADO INTERNO — encoder acumulado, saltos, limites,
+// CPD e Ackerman vigentes, flash, corrente. Ate 09/09 o simulador ignorava esses
+// quadros: no modo placa o painel mostrava "—" para tudo isso, porque o unico
+// canal considerado era o PGN 253, que so leva angulo, chaves e um byte.
+//
+// E daqui que sai, no trator, a contagem do encoder que o calibrador por GPS
+// precisa — sem depender do firmware de bancada.
+//
+// CUIDADO: o quadro de resposta tem 38 bytes. O comentario do firmware avisa que
+// o op 3 e "exclusivo do utilitario de manutencao, nao enviar ao parser curto do
+// AgIO". Com o AgIO na mesma porta, nao perguntar.
+
+const OPS_SERVICO = { LER: 0, CENTRAR: 1, LIMITES: 2, DIAGNOSTICO: 3 };
+
+// Monta a pergunta. `marca` volta ecoada na resposta, para casar pergunta e
+// resposta quando ha mais de uma no ar.
+function servico(op, { limiteEsquerdo = 0, limiteDireito = 0, marca = 0 } = {}) {
+  const b = Buffer.alloc(16);
+  b[0] = 0x80; b[1] = 0x81; b[2] = 0x7F; b[3] = 240; b[4] = 10;
+  b.write('AP01', 5, 'ascii');
+  b[9] = op & 0xFF;
+  b.writeUInt16LE(limiteEsquerdo & 0xFFFF, 10);
+  b.writeUInt16LE(limiteDireito & 0xFFFF, 12);
+  b[14] = marca & 0xFF;
+  b[15] = crc(b);
+  return b;
+}
+
+// Resposta do modulo. Devolve null se nao for um quadro 239 conhecido.
+function parseDiagnostico(buf) {
+  if (buf.length !== 38 || buf[0] !== 0x80 || buf[1] !== 0x81 || buf[3] !== 239) return null;
+  const etiqueta = buf.toString('ascii', 5, 9);
+  const crcOk = buf[37] === crc(buf.subarray(0, 38));
+  const comum = { etiqueta, op: buf[9], marca: buf[36], crcOk };
+
+  if (etiqueta === 'AP01') {
+    const bits = buf[11];
+    return {
+      ...comum,
+      resultado: buf[10],            // 0 ok, 1 recusado, 2 op desconhecida
+      referencia:     !!(bits & 0x01),
+      ligado:         !!(bits & 0x02),
+      trava:          !!(bits & 0x04),
+      heartbeatFresco:!!(bits & 0x08),
+      limitesValidos: !!(bits & 0x10),
+      falha: buf[12],
+      falhaNome: nomeDaFalha(buf[12]),
+      contagensPorGrau: buf[13],
+      ackerman: buf[14],
+      limiar: buf[15],
+      anguloX100: buf.readInt16LE(16),
+      pwm: buf.readInt16LE(18),
+      limiteEsquerdo: buf.readUInt16LE(20),
+      limiteDireito: buf.readUInt16LE(22),
+      encoderAcumulado: buf.readInt32LE(24),
+      ms: buf.readUInt32LE(28),
+      saltos: buf.readUInt16LE(32),
+      flashPendente: !!buf[34],
+      flashErro: !!buf[35],
+    };
+  }
+  if (etiqueta === 'AD01') {
+    const semLeitura = 0xFFFFFFFF;
+    const dtHb = buf.readUInt32LE(13);
+    const dtPgn = buf.readUInt32LE(17);
+    return {
+      ...comum,
+      canPronto: !!buf[11],
+      falha: buf[12],
+      falhaNome: nomeDaFalha(buf[12]),
+      msDesdeHeartbeat: dtHb === semLeitura ? null : dtHb,
+      msDesdePgn: dtPgn === semLeitura ? null : dtPgn,
+      alertasCan: buf.readUInt32LE(21),
+      erroMotor: buf.readUInt16LE(25),
+      corrente: buf.readUInt16LE(27) / 100,
+      ms: buf.readUInt32LE(29),
+      pedido: !!buf[33],
+      referencia: !!buf[34],
+      trava: !!buf[35],
+    };
+  }
+  return null;
+}
+
 // Le a velocidade do comando do Keya (23 00 20 01 + int32 em duas palavras).
 // E o que permite saber o PWM de verdade, com sinal, quando a placa ecoa.
 function velocidadeDoComandoKeya(dados) {
@@ -180,5 +267,6 @@ function separarQuadros(bytes) {
 }
 
 module.exports = {
-  nomeDaFalha, FALHAS, steerData, steerSettings, steerConfig, hello, helloLegado, parseFromAutoSteer, separarQuadros, crc,
+  nomeDaFalha, FALHAS, steerData, steerSettings, steerConfig, hello, helloLegado,
+  servico, OPS_SERVICO, parseDiagnostico, parseFromAutoSteer, separarQuadros, crc,
                    velocidadeDoComandoKeya };
