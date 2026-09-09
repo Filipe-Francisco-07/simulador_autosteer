@@ -328,8 +328,19 @@ setInterval(() => {
   //    No espelho os dois precisam correr, entao o simulado tambem avanca.
   if (!naPlaca || espelho.rodando) manda('T ' + decorrido);
 
-  // 2. o operador no volante (so quando o piloto nao esta comandando)
-  if (!estadoFirmware.autosteerLigado) {
+  // 2. o operador no volante.
+  //
+  // Isto rodava so com o piloto DESLIGADO, e essa guarda tornava impossivel
+  // reproduzir um override: override E girar o volante com o piloto engatado.
+  // O operador nao pede licenca ao modulo — ele pega o volante e vira. Sem
+  // isso o cenario "mao no volante" da suite nunca foi um override de verdade:
+  // ele so mudava uma leitura de corrente, e passava porque a planta antiga
+  // (CPD 100) era lenta o bastante para o PWM ficar alto o tempo todo.
+  //
+  // Com o piloto engatado o operador nao vence sozinho: o motor puxa de volta.
+  // Quem decide o resultado e a disputa entre os dois, e e justamente essa
+  // disputa que levanta a corrente e dispara o desengate.
+  {
     const taxa = 32 * (decorrido / 1000);   // graus por segundo no volante
     if (estercandoEsq) motor.girarManual(-taxa);
     if (estercandoDir) motor.girarManual(+taxa);

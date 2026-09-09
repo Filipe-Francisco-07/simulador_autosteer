@@ -51,7 +51,7 @@ async function rodar(segundos, comando) {
 (async () => {
   await espera(300);
   manda('S ' + aog.steerSettings({ ganhoP: 40, pwmAlto: 180, pwmBaixo: 30, pwmMinimo: 25,
-                                   contagensPorGrau: 100, offsetDirecao: 0, ackerman: 100 })
+                                   contagensPorGrau: 19, offsetDirecao: 0, ackerman: 100 })
     .toString('hex').toUpperCase());
 
   const casos = [

@@ -78,7 +78,25 @@ class MotorKeya {
 
   // Avanca a fisica em `ms` milissegundos.
   passo(ms) {
-    const alvo = (this.habilitado && !this.travado) ? this.comandoVel : 0;
+    // A mao no volante e CARGA, nao so uma leitura de corrente diferente.
+    //
+    // Antes ela nao freava nada: o motor continuava girando a roda no mesmo
+    // ritmo e so o amperimetro mudava. Isso fazia o cenario de override passar
+    // por acidente enquanto a planta era lenta (CPD 100, PWM sempre alto) e
+    // falhar assim que ela ficou rapida — em nenhum dos dois casos o que estava
+    // sendo medido era um override.
+    //
+    // Um braco humano segura a coluna de direcao contra um motor de autosteer;
+    // e essa a premissa do proprio recurso de override. Entao com a mao no
+    // volante o motor quase para: sobra so o que ele consegue arrastar.
+    // ATENCAO — 0,12 e CHUTE, nao medida. Ninguem cronometrou um braco contra
+    // este motor. O que o numero muda e a RAPIDEZ com que o override dispara,
+    // nao SE ele dispara: qualquer valor baixo deixa o motor mandado e parado,
+    // que e o que levanta a corrente. Medir isso e o item "limiar do override
+    // sob carga" que a documentacao do AgroPreciso marca como bloqueante.
+    const RESISTENCIA_MAO = 0.12;   // fracao da velocidade que ele ainda vence
+    const teto = this.maoNoVolante ? RESISTENCIA_MAO : 1;
+    const alvo = (this.habilitado && !this.travado) ? this.comandoVel * teto : 0;
     // resposta do motor: chega perto do comando em ~100 ms
     this.velocidadeAtual += (alvo - this.velocidadeAtual) * Math.min(1, ms / 100);
     if (Math.abs(this.velocidadeAtual) < 1) this.velocidadeAtual = 0;
@@ -131,8 +149,13 @@ class MotorKeya {
     // e por isso que um angulo maximo mal ajustado desengata o piloto sozinho
     // no meio da manobra de cabeceira.
     if (this.travado || this.noBatente) return this.correnteMao * 1.2;
-    if (this.velocidadeAtual === 0) return 0;
-    return this.maoNoVolante ? this.correnteMao : this.correnteLivre;
+    // O que puxa corrente e o motor sendo MANDADO, nao o motor girando. Um
+    // motor travado contra a mao fica parado e puxa o maximo; era ler a
+    // velocidade aqui que fazia a mao no volante nao ser sentida quando o
+    // modulo estava em cima da linha.
+    if (this.comandoVel === 0) return 0;
+    if (this.maoNoVolante) return this.correnteMao;
+    return this.velocidadeAtual === 0 ? 0 : this.correnteLivre;
   }
 
   // Monta o heartbeat do jeito que o motor manda (big-endian, 20 ms).

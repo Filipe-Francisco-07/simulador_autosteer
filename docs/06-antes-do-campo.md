@@ -111,15 +111,25 @@ movimento, porque custa dois segundos.
 |---|---|
 | o cão de guarda do AOG solta em **1000 ms exatos** | placa |
 | o cão de guarda do motor solta em ~1000 ms | placa e simulado |
-| a mão no volante desengata **e continua solto** | placa e simulado |
+| a mão no volante desengata **e continua solto** | placa e simulado — mas ver a ressalva abaixo |
 | o parser se recupera de lixo no fio em **2 a 3 quadros** (220-330 ms) | placa |
 | o encoder atravessa o estouro de 16 bits sem perder a conta | placa e simulado |
 | o encoder **não deriva**: 8 giros batente a batente, variação 0,00° | placa e simulado |
 | forçar o batente sobe a corrente e desengata sozinho | simulado |
 | o firmware compilado no PC se comporta como o do ESP32 | espelho, 20/21 |
 
-Os 8 cenários de segurança passam **na placa real** (`node testes/seguranca.js bancada`)
-e no simulado. Os 6 do `estresse-teste.js` do Pedro também.
+> ⚠️ **A linha da mão no volante vale menos do que parece.** A medida na placa
+> foi feita com o firmware anterior a 07/09 e com a versão do cenário que não
+> era um override de verdade (o simulador proibia girar o volante engatado, e a
+> mão não freava o motor). O comportamento correto foi reproduzido em 08/09 no
+> **simulado**; na placa ainda não, porque ela não estava disponível. Refazer
+> `node testes/seguranca.js bancada` quando o ESP32 voltar.
+
+Os cenários de segurança passavam **na placa real**
+(`node testes/seguranca.js bancada`) com o firmware de até 06/09. Depois da
+reescrita do firmware em 07/09 e das correções de 08/09, só há resultado no
+**simulado** — a placa não foi religada desde então. Os 6 do
+`estresse-teste.js` do Pedro também são de antes.
 
 ## 5. O que continua SEM cobertura
 
@@ -129,6 +139,32 @@ Honestidade sobre o que o simulador não alcança:
   próprio plano de calibração marca como bloqueante. Precisa do motor no trator,
   com o peso da direção. Nem o simulador nem o AogFake chegam lá. **§2.5 do
   plano de calibração, no pátio, antes de qualquer teste em movimento.**
+
+  > **Corrigido em 08/09 o que o simulador conseguia dizer sobre isso — e não
+  > era nada.** Até então o simulador **proibia girar o volante com o piloto
+  > engatado**, que é exatamente o que override significa, e a mão no volante
+  > não oferecia resistência nenhuma ao motor: só trocava uma leitura de
+  > corrente. O cenário "mão no volante" da suíte passava por acidente, porque
+  > a calibragem errada (CPD 100) deixava a planta tão lenta que o PWM ficava
+  > alto o tempo todo e a corrente subia por tabela. Corrigida a calibragem, o
+  > módulo passou a chegar na linha com PWM zero, a mão parada deixou de
+  > encontrar qualquer coisa, e o caso quebrou — foi assim que o defeito
+  > apareceu.
+  >
+  > Agora o override é de verdade: o operador vira contra o piloto engatado, o
+  > módulo reage (PWM −128), a corrente vai a 11 A e ele desengata por
+  > **sobrecorrente em menos de 300 ms**, e continua solto depois de soltar.
+  >
+  > **Isso não fecha o item.** A resistência da mão no modelo é chute (12% da
+  > velocidade), não medida. O número muda a *rapidez* do disparo, não *se* ele
+  > dispara — mas o limiar em ampères continua tendo que sair do pátio.
+
+- **Avise o operador: apoiar a mão no volante derruba o piloto.** Medido em
+  08/09 no simulado: **0,6 s** até cair, por sobrecorrente, sem o operador ter
+  virado nada. Com o piloto ligado o módulo corrige de tempos em tempos, e na
+  primeira correção a mão apoiada vira carga. Quem não souber vai achar que o
+  sistema caiu sozinho e vai perder confiança nele. O tempo exato depende do
+  chute de resistência acima; o comportamento não.
 - **O barramento CAN físico.** No modo bancada os quadros nascem e morrem dentro
   do ESP32. O transceptor e a fiação não entram — e o log de 01/09 mostrou falha
   de TX sistemática, que aponta para motor desligado, CAN-H/CAN-L trocados ou

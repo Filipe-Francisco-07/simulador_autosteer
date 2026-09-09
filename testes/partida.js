@@ -6,8 +6,16 @@
 // 30/08 o offset salvo era 283 e o angulo nascia a dezenas de graus do real,
 // em silencio.
 //
-// O firmware ganhou uma ancora (commit eb58f4f): o primeiro PGN 252 depois do
-// boot vira o "centro", e os dois se cancelam. Este teste confere se ela pega.
+// O firmware absorve esse offset, mas o MECANISMO mudou em 07/09. Antes era uma
+// ancora (commit eb58f4f): o primeiro PGN 252 depois do boot virava o "centro".
+// Essa funcao (`ancorarOffset`) ficou no logica_direcao.h mas nao e mais chamada
+// por ninguem — codigo morto, junto com `engateDecidir` e `bloqueioExpirou`.
+//
+// Quem faz o trabalho agora e `confirmarCentro()`, que grava
+// `centro = acumulado + offset` no zero de partida. A conta se cancela igual:
+//   angulo = (acumulado - centro + offset)/cpd = 0
+// Ou seja o resultado esperado deste teste nao mudou; a razao dele mudou.
+// Este teste confere se o offset herdado continua sendo absorvido.
 //
 //   node testes/partida.js <simulado|bancada>
 const { Piloto } = require('./piloto.js');
@@ -25,7 +33,7 @@ const { Piloto } = require('./piloto.js');
 
   // 1. offset herdado de outra sessao, como o AOG manda na partida
   const OFFSET_HERDADO = 283;    // o valor real do dump de 30/08
-  p.envia('ajustes', { ganhoP: 20, contagensPorGrau: 100, pwmMinimo: 25,
+  p.envia('ajustes', { ganhoP: 20, contagensPorGrau: 19, pwmMinimo: 25,
                         pwmAlto: 180, offsetDirecao: OFFSET_HERDADO });
   await p.espera(1500);
   const aoLigar = p.amostra();

@@ -16,7 +16,7 @@ const aog = require('./aog.js');
 
 const EXE = path.join(__dirname, '..', 'sim', 'firmware_sim.exe');
 const AJUSTES_PADRAO = { ganhoP: 40, pwmAlto: 180, pwmBaixo: 30, pwmMinimo: 25,
-                          contagensPorGrau: 100, offsetDirecao: 0, ackerman: 100 };
+                          contagensPorGrau: 19, offsetDirecao: 0, ackerman: 100 };
 
 class Driver {
   constructor() {
