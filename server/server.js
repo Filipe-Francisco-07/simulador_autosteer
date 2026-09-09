@@ -701,6 +701,17 @@ function aplicarComando(c) {
       manda('R');
       mandarAjustesQuandoSubir();
       break;
+
+    // Acao desconhecida nao pode sumir calada.
+    //
+    // Um teste mandava 'reiniciar' onde o nome e 'reset'; o comando caia aqui
+    // sem erro nenhum e o teste seguia como se tivesse reiniciado — passando por
+    // motivo errado por semanas. Comando que nao existe agora aparece no log e
+    // volta para quem mandou.
+    default:
+      console.error('[servidor] acao desconhecida: ' + JSON.stringify(c.acao));
+      transmitir({ t: 'acaoDesconhecida', acao: c.acao });
+      break;
   }
 }
 

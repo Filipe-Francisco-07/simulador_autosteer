@@ -76,6 +76,9 @@ const deslizante = (id, acao, formatar, rotulo, transformar) => {
   mostrar();
 };
 deslizante('escorrega', 'escorregamento', (v) => v + '%', 'vEscorrega', (v) => v / 100);
+// Folga em decimos de grau: o interessante esta entre 0 e 6 graus, e um passo
+// de 1 grau seria grosso demais para achar onde ela comeca a incomodar.
+deslizante('folga', 'folga', (v) => (v / 10).toFixed(1).replace('.', ',') + '°', 'vFolga', (v) => v / 10);
 deslizante('cpdReal', 'cpdReal', (v) => v, 'vCpdReal');
 deslizante('batente', 'batente', (v) => v + '°', 'vBatente');
 deslizante('velMotor', 'velMotor', (v) => Number(v).toFixed(1).replace('.', ',') + ' v/s', 'vVelMotor');
@@ -359,6 +362,8 @@ ws.onmessage = (ev) => {
     $('steerInReverse').checked = m.isSteerInReverse;
     $('escorrega').value = Math.round(m.motor.escorregamento * 100);
     $('vEscorrega').textContent = Math.round(m.motor.escorregamento * 100) + '%';
+    $('folga').value = Math.round((m.motor.folgaGraus || 0) * 10);
+    $('vFolga').textContent = (m.motor.folgaGraus || 0).toFixed(1).replace('.', ',') + '°';
     $('cpdReal').value = m.motor.contagensPorGrauReal;
     $('vCpdReal').textContent = m.motor.contagensPorGrauReal;
     $('batente').value = m.motor.batenteGraus;
