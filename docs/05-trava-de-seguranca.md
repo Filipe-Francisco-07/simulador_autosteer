@@ -110,15 +110,44 @@ if (!pedido) {
 }
 ```
 
-Ou seja: **250 ms com o piloto desligado e o módulo saudável** e a trava cai
-sozinha. Não precisa mais que o AOG tenha mandado `false` naquele boot
-específico.
+> ### Correção de 09/09 — eu errei a leitura disto em 07/09
+>
+> Escrevi aqui que "a trava cai sozinha" e que o ciclo desliga/liga na tela não
+> era mais necessário. **Está errado, e a medição mostra o contrário**
+> (`node testes/trava-presa.js simulado`, 09/09):
+>
+> ```
+> 1. engate normal ................. aciona
+> 2. mao no volante ................ largou (trava armada)
+> 3. mao saiu, AOG segue pedindo ... continua solto (trava presa)
+> 4. desliga e liga na tela ........ VOLTOU a acionar
+> ```
+>
+> Comparando os dois firmwares:
+>
+> | | até 06/09 (`engateDecidir`) | desde 07/09 (`receber`) |
+> |---|---|---|
+> | o que solta a trava | qualquer `!pedido`, **na hora** | `!pedido` por **250 ms** |
+> | condições extras | nenhuma | heartbeat fresco, referência, limites válidos, motor sem erro, corrente baixa |
+>
+> Ou seja o firmware novo é **mais exigente**, não menos. O ciclo desliga/liga
+> continua obrigatório, e agora demora um pouco mais.
+>
+> **O que confundi:** o commit `fc50b61` chama-se *"tira as travas que exigiam
+> terminal no meio da lavoura"* e ele faz isso — mas as travas que exigiam
+> **terminal** (a ferramenta de serviço, op1/op2) eram outras: limites zerando,
+> configuração recusada ficando presa, piscada de CAN derrubando a referência.
+> Essa trava de segurança nunca exigiu terminal; ela exige a **tela**. Li o
+> título do commit e estendi para o que ele não dizia.
+
+Ou seja: **250 ms com o piloto desligado e o módulo saudável** e a trava cai.
+O que mudou não foi a necessidade do ciclo, foi o que ele exige junto.
 
 O que isso resolve das duas dores anotadas acima:
 
 | dor de 05/09 | hoje |
 |---|---|
-| ferramenta que engata direto encontra módulo morto | some: basta 250 ms de piloto desligado, e nenhuma ferramenta engata no primeiro quadro |
+| ferramenta que engata direto encontra módulo morto | **continua**: ela precisa mandar `engatar:false` por 250 ms antes |
 | operador não sabe por que parou | resolvido: existe **código de falha** |
 
 ## A terceira recomendação virou código

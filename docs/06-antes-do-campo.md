@@ -120,14 +120,17 @@ O mais comum na partida é **1 — sem zero de partida**.
 mas só com o trator **parado**, piloto desligado e o motor respondendo. Se a
 placa reiniciou andando, ela espera. Parar resolve — não precisa de terminal.
 
-**3. Se não for isso, desligue o piloto na tela e ligue de novo.** A trava de
-segurança agora cai sozinha depois de 250 ms com o piloto desligado, então isso
-é bem menos provável que era em 05/09 — mas continua sendo o primeiro
-movimento, porque custa dois segundos.
+**3. Se não for isso, desligue o piloto na tela e ligue de novo.** Continua
+obrigatório, e desde 07/09 exige um pouco mais: **250 ms** com o piloto
+desligado **e** o módulo saudável (heartbeat fresco, referência de pé, limites
+válidos, motor sem erro, corrente baixa). Desligar e religar rápido demais pode
+não soltar — conte até dois.
 
-> Até 06/09 a trava só soltava na borda de descida do pedido, e um ciclo
-> desliga/liga era **obrigatório**. Foi isso que derrubou o AogFake em 01/09.
-> O commit `fc50b61` de 07/09 mudou isso.
+> Escrevi em 07/09 que esse ciclo tinha deixado de ser necessário.
+> **Estava errado**, e a medição de 09/09 mostra o contrário. A correção e a
+> comparação entre os dois firmwares estão em
+> [05-trava-de-seguranca.md](05-trava-de-seguranca.md). O firmware de 07/09
+> ficou **mais** exigente aqui, não menos.
 
 ## 4. O que está provado
 
