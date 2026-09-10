@@ -38,28 +38,102 @@ function steerSettings({ ganhoP = 40, pwmAlto = 180, pwmBaixo = 30, pwmMinimo = 
 }
 
 // PGN 200 — o "quem esta ai" que o AgIO manda para descobrir modulos.
+//
+// TAMANHO IMPORTA. Desde 07/09 o firmware valida o quadro inteiro:
+// `n == dados + 6`, fonte, PGN, o campo de tamanho e o CRC. Com dados = 3 o
+// quadro tem 9 bytes, nao 11.
+//
+// A versao anterior daqui montava 11 bytes e era DESCARTADA em silencio — o
+// modulo nunca respondia e o simulador nunca exercitou o caminho de descoberta,
+// que e exatamente o que o commit 3d87c18 ("modulo nao some do AgIO") existe
+// para consertar. Testar o caminho de descoberta com um quadro que o firmware
+// rejeita nao testa nada.
 function hello() {
-  const b = Buffer.alloc(11);
+  const b = Buffer.alloc(9);
   b[0] = 0x80; b[1] = 0x81; b[2] = 0x7F; b[3] = 200; b[4] = 3;
   b[5] = 0; b[6] = 0; b[7] = 0;
-  b[8] = 0; b[9] = 0;
-  b[10] = crc(b);
-  return b.subarray(0, 9 + 1 + 1);
+  b[8] = crc(b);
+  return b;
+}
+
+// O hello que o AgIO 6.8.5 manda de verdade.
+//
+// Ele nao recalcula a soma: manda 0x47 fixo, que NAO e o CRC destes bytes. O
+// firmware abre uma excecao exata e somente para este quadro (aogHelloValido),
+// porque recusa-lo faria o modulo sumir da tela do AgIO. Vale ter os dois aqui:
+// o correto e o que o mundo real manda.
+function helloLegado() {
+  return Buffer.from([0x80, 0x81, 127, 200, 3, 56, 0, 0, 0x47]);
+}
+
+// PGN 251 — a configuracao do trator que o AgIO manda junto com os ajustes.
+//
+// O simulador NUNCA mandava este quadro, entao nada aqui exercitava o limiar de
+// corrente, a velocidade minima nem o tratamento dos bits de configuracao — e
+// esses bits custaram dias de campo, segundo os comentarios do proprio firmware.
+//
+// Mapa do set0, conferido pelo Pedro em FormSteer.cs:
+//   bit0 InvertWAS | bit1 InvertRelays | bit2 InvertSteer | bit3 WAS "Single"
+//   bit4 driver "Cytron" | bit5 engate por "Switch" | bit6 por "Button"
+//   bit7 encoder de pulsos
+// 56 (bits 3, 4 e 5) e o PADRAO DE FABRICA do AgOpenGPS e o que os perfis do
+// trator mandam — recusa-lo deixava o modulo em Configuracao para sempre.
+//
+// maxPulse so quer dizer limiar de corrente quando ha sensor de carga marcado
+// (set1 bit1 = pressao, bit2 = corrente). Sem sensor ele e contagem de pulso de
+// encoder, e ler isso como amperes dava um limiar de 3 sem ninguem pedir.
+// UNIDADE DA VELOCIDADE MINIMA: o parametro aqui e em km/h, e o quadro leva
+// DECIMOS, porque e isso que o AgOpenGPS manda:
+//
+//   FormSteer.cs:1184
+//   mf.p_251.pgn[mf.p_251.minSpeed] = (byte)(setAS_minSteerSpeed * 10);
+//
+// Ou seja o campo tem a mesma unidade da velocidade do PGN 254, e a comparacao
+// do firmware (`velocidade < velocidadeMinima`) esta certa. Cheguei a suspeitar
+// de mistura de unidades no firmware porque meu teste mandava o valor cru; a
+// fonte do AOG desmentiu. Fica explicito aqui para nao suspeitar de novo.
+function steerConfig({ set0 = 56, maxPulse = 0, minSpeedKmh = 0, set1 = 0 } = {}) {
+  const b = Buffer.alloc(14);
+  b[0] = 0x80; b[1] = 0x81; b[2] = 0x7F; b[3] = 0xFB; b[4] = 8;
+  b[5] = set0 & 0xFF; b[6] = maxPulse & 0xFF;
+  b[7] = Math.max(0, Math.min(255, Math.round(minSpeedKmh * 10))) & 0xFF;
+  b[8] = set1 & 0xFF;
+  b[9] = 0; b[10] = 0; b[11] = 0; b[12] = 0;
+  b[13] = crc(b);
+  return b;
 }
 
 // PGN 253 — a resposta do modulo.
 //
-// ATENCAO: o byte 12 NAO e so o PWM. O firmware faz (main.cpp, byteDiagnostico):
+// ATENCAO: o byte 12 NAO e so o PWM. O firmware faz (main.cpp, no envio do 253):
 //
-//     if (pwm == 0) return cpdEmUso;   // acionando zero? manda o CPD
+//     const uint8_t diag = controle.pwm ? abs(controle.pwm) : (uint8_t)controle.falha;
 //
-// Foi decisao deliberada depois do teste de campo de 30/08: com o CPD errado o
-// angulo saia 5x menor e ninguem via qual valor o modulo usava. Agora o proprio
-// campo denuncia — mas quem le sem saber acha que o motor esta acionando com
-// forca 100 quando ele esta parado.
+// Ou seja: ACIONANDO manda o PWM de verdade; PARADO manda o CODIGO DA FALHA.
+// Ate 06/09 o valor parado era o CPD em uso; mudou em 07/09 e a tabela abaixo e
+// a nova. Quem le sem saber acha que o motor esta acionando com forca 5 quando
+// na verdade ele esta parado por sobrecorrente.
 //
 // Nao da para distinguir os dois pelo numero. Na bancada, o comando CAN ecoado
 // diz o PWM de verdade; sem ele, resta o byte como esta.
+const FALHAS = [
+  'nenhuma',
+  'sem zero de partida',
+  'salto de encoder',
+  'sem heartbeat do motor',
+  'sem PGN do AOG',
+  'sobrecorrente',
+  'motor em erro',
+  'transporte CAN',
+  'ajuste trocado ou recusado',
+  'fora do curso',
+  'abaixo da velocidade minima',
+];
+
+function nomeDaFalha(codigo) {
+  return FALHAS[codigo] || ('codigo ' + codigo);
+}
+
 function parseFromAutoSteer(buf) {
   if (buf.length < 14 || buf[0] !== 0x80 || buf[1] !== 0x81 || buf[3] !== 0xFD) return null;
   const diagnostico = buf[12];
@@ -68,10 +142,100 @@ function parseFromAutoSteer(buf) {
     rumoX10:    buf.readUInt16LE(7),
     rolagemX10: buf.readInt16LE(9),
     chaves:     buf[11],
-    pwm:        diagnostico,      // pode ser o PWM ou o CPD — ver acima
+    pwm:        diagnostico,      // pode ser o PWM ou o codigo de falha — ver acima
     diagnostico,
+    // So vale como falha se o modulo estiver parado, e isso o 253 sozinho nao
+    // diz. Quem sabe e o eco do CAN na bancada; sem ele fica a leitura otimista.
+    falhaSeParado: nomeDaFalha(diagnostico),
     crcOk:      buf[13] === crc(buf.subarray(0, 14)),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostico: PGN 240 (pergunta) e PGN 239 (resposta)
+//
+// O firmware responde com o ESTADO INTERNO — encoder acumulado, saltos, limites,
+// CPD e Ackerman vigentes, flash, corrente. Ate 09/09 o simulador ignorava esses
+// quadros: no modo placa o painel mostrava "—" para tudo isso, porque o unico
+// canal considerado era o PGN 253, que so leva angulo, chaves e um byte.
+//
+// E daqui que sai, no trator, a contagem do encoder que o calibrador por GPS
+// precisa — sem depender do firmware de bancada.
+//
+// CUIDADO: o quadro de resposta tem 38 bytes. O comentario do firmware avisa que
+// o op 3 e "exclusivo do utilitario de manutencao, nao enviar ao parser curto do
+// AgIO". Com o AgIO na mesma porta, nao perguntar.
+
+const OPS_SERVICO = { LER: 0, CENTRAR: 1, LIMITES: 2, DIAGNOSTICO: 3 };
+
+// Monta a pergunta. `marca` volta ecoada na resposta, para casar pergunta e
+// resposta quando ha mais de uma no ar.
+function servico(op, { limiteEsquerdo = 0, limiteDireito = 0, marca = 0 } = {}) {
+  const b = Buffer.alloc(16);
+  b[0] = 0x80; b[1] = 0x81; b[2] = 0x7F; b[3] = 240; b[4] = 10;
+  b.write('AP01', 5, 'ascii');
+  b[9] = op & 0xFF;
+  b.writeUInt16LE(limiteEsquerdo & 0xFFFF, 10);
+  b.writeUInt16LE(limiteDireito & 0xFFFF, 12);
+  b[14] = marca & 0xFF;
+  b[15] = crc(b);
+  return b;
+}
+
+// Resposta do modulo. Devolve null se nao for um quadro 239 conhecido.
+function parseDiagnostico(buf) {
+  if (buf.length !== 38 || buf[0] !== 0x80 || buf[1] !== 0x81 || buf[3] !== 239) return null;
+  const etiqueta = buf.toString('ascii', 5, 9);
+  const crcOk = buf[37] === crc(buf.subarray(0, 38));
+  const comum = { etiqueta, op: buf[9], marca: buf[36], crcOk };
+
+  if (etiqueta === 'AP01') {
+    const bits = buf[11];
+    return {
+      ...comum,
+      resultado: buf[10],            // 0 ok, 1 recusado, 2 op desconhecida
+      referencia:     !!(bits & 0x01),
+      ligado:         !!(bits & 0x02),
+      trava:          !!(bits & 0x04),
+      heartbeatFresco:!!(bits & 0x08),
+      limitesValidos: !!(bits & 0x10),
+      falha: buf[12],
+      falhaNome: nomeDaFalha(buf[12]),
+      contagensPorGrau: buf[13],
+      ackerman: buf[14],
+      limiar: buf[15],
+      anguloX100: buf.readInt16LE(16),
+      pwm: buf.readInt16LE(18),
+      limiteEsquerdo: buf.readUInt16LE(20),
+      limiteDireito: buf.readUInt16LE(22),
+      encoderAcumulado: buf.readInt32LE(24),
+      ms: buf.readUInt32LE(28),
+      saltos: buf.readUInt16LE(32),
+      flashPendente: !!buf[34],
+      flashErro: !!buf[35],
+    };
+  }
+  if (etiqueta === 'AD01') {
+    const semLeitura = 0xFFFFFFFF;
+    const dtHb = buf.readUInt32LE(13);
+    const dtPgn = buf.readUInt32LE(17);
+    return {
+      ...comum,
+      canPronto: !!buf[11],
+      falha: buf[12],
+      falhaNome: nomeDaFalha(buf[12]),
+      msDesdeHeartbeat: dtHb === semLeitura ? null : dtHb,
+      msDesdePgn: dtPgn === semLeitura ? null : dtPgn,
+      alertasCan: buf.readUInt32LE(21),
+      erroMotor: buf.readUInt16LE(25),
+      corrente: buf.readUInt16LE(27) / 100,
+      ms: buf.readUInt32LE(29),
+      pedido: !!buf[33],
+      referencia: !!buf[34],
+      trava: !!buf[35],
+    };
+  }
+  return null;
 }
 
 // Le a velocidade do comando do Keya (23 00 20 01 + int32 em duas palavras).
@@ -102,5 +266,7 @@ function separarQuadros(bytes) {
   return quadros;
 }
 
-module.exports = { steerData, steerSettings, hello, parseFromAutoSteer, separarQuadros, crc,
+module.exports = {
+  nomeDaFalha, FALHAS, steerData, steerSettings, steerConfig, hello, helloLegado,
+  servico, OPS_SERVICO, parseDiagnostico, parseFromAutoSteer, separarQuadros, crc,
                    velocidadeDoComandoKeya };

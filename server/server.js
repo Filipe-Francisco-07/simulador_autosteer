@@ -20,6 +20,7 @@ const { Trator, LinhaAB, MARCHAS } = require('./trator.js');
 const { Placa, listarPortas, BAUD_PADRAO } = require('./placa.js');
 const { Espelho, roteiro, roteiroEstresse } = require('./espelho.js');
 const aog = require('./aog.js');
+const { CalibradorPorGps } = require('./calibrador.js');
 
 const PORTA = 3000;
 const PASSO_MS = 20;           // cadencia real do heartbeat do Keya
@@ -38,13 +39,43 @@ const linha = new LinhaAB();
 let aogLigado = true;          // o AOG esta mandando PGN? (desligar = cabo caido)
 let pilotoPedido = false;      // o operador apertou engatar
 let comandoAog = { velocidadeKmh: 0, engatar: false, anguloAlvoGraus: 0, xte: 0 };
+// O que o AOG manda no PGN 252. O CPD nasce em 19 porque e o que o batente
+// medido no JD 5078 em 05/09 implica: 760 contagens do centro ate o fim de
+// curso, que sao ~40 graus de roda. Ficou 100 aqui por muito tempo, herdado do
+// padrao de tela do AOG, e isso mentia de dois jeitos ao mesmo tempo — o angulo
+// saia 5x menor E o volante na mao estourava o teto de salto de encoder do
+// firmware, derrubando a referencia sem que nada na tela explicasse.
 let ajustesAog = { ganhoP: 40, pwmAlto: 180, pwmBaixo: 30, pwmMinimo: 25,
-                   contagensPorGrau: 100, offsetDirecao: 0, ackerman: 100 };
+                   contagensPorGrau: 19, offsetDirecao: 0, ackerman: 100 };
 let motorRespondendo = true;   // o Keya esta mandando heartbeat?
+
+// Mede o esterçamento pelo GPS enquanto o trator anda, sem sensor nas rodas.
+// Roda sempre, calado; so responde quando o passeio deu material suficiente.
+// No trator de verdade ele vive no mesmo lugar: quem tem posicao e encoder ao
+// mesmo tempo e o PC do AgOpenGPS, nao o ESP32.
+const calibrador = new CalibradorPorGps({ entreEixos: trator.entreEixos });
+let ruidoGpsM = 0.02;   // RTK fixed. Subir aqui simula GPS ruim de propósito.
+let contaGps = 0;
+
+// Ruido gaussiano (Box-Muller). O erro de RTK nao e uniforme: e uma nuvem em
+// volta da posicao certa, e usar uniforme aqui deixaria o metodo parecer melhor
+// do que ele e no campo.
+function gaussiana() {
+  let u = 0, v = 0;
+  while (u === 0) u = Math.random();
+  while (v === 0) v = Math.random();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
 let estadoFirmware = {};
 let pwmRealDaPlaca = 0;      // vem do comando CAN ecoado (so no firmware de bancada)
 let ultimoEnableDaPlaca = 0; // quando a placa mandou o ultimo ENABLE ao motor
 let ultimoPgn253 = null;
+// Ultimo AP01 que o modulo respondeu. E o unico jeito de ver o interior dele
+// sem o firmware de bancada — e no trator e daqui que sai a contagem de encoder
+// que o calibrador por GPS precisa.
+let ultimoDiagnostico = null;
+let marcaDiagnostico = 0;
+let proximoDiagnostico = 0;
 let contadores = { pgn253: 0, canCmd: 0 };
 
 // ---- de onde vem o firmware -----------------------------------------------
@@ -66,6 +97,8 @@ let placaMuda = false;
 const placa = new Placa({
   aoReceberPgn: (quadro) => {
     espelho.registrar('placa', quadro);
+    const d = aog.parseDiagnostico(quadro);
+    if (d && d.crcOk && d.etiqueta === 'AP01') ultimoDiagnostico = { ...d, quando: Date.now() };
     const p = aog.parseFromAutoSteer(quadro);
     ultimoPgnDaPlaca = Date.now();
     if (placaMuda) {
@@ -83,7 +116,8 @@ const placa = new Placa({
         ...estadoFirmware,
         anguloAtualX100: p.anguloX100,
         // na bancada o PWM verdadeiro vem do comando CAN; sem ele, o byte de
-        // diagnostico e o que ha — e ele vira CPD quando o motor esta parado
+        // diagnostico e o que ha — e ele vira CODIGO DE FALHA com o motor parado
+        // (mudou em 07/09; antes era o CPD em uso)
         pwmSaida: placa.temBancada ? pwmRealDaPlaca : p.pwm,
         // "esta acionando?" na placa: mandou ENABLE ha menos de 600 ms.
         // O firmware manda comando CAN a cada 50 ms, entao 600 ms de silencio
@@ -93,6 +127,10 @@ const placa = new Placa({
           ? (Date.now() - ultimoEnableDaPlaca < 600)
           : undefined,
         byteDiagnostico: p.diagnostico,
+        // com PWM real conhecido da para dizer se o byte e falha ou acionamento
+        falhaDaPlaca: placa.temBancada && pwmRealDaPlaca === 0
+          ? p.falhaSeParado
+          : (p.diagnostico === 0 ? 'nenhuma' : undefined),
         chaves: p.chaves,
         deQuem: 'placa',
       };
@@ -186,6 +224,8 @@ function tratarSaidaFirmware(l) {
   } else if (m.t === 'serial_tx') {
     for (const q of aog.separarQuadros(Buffer.from(m.hex, 'hex'))) {
       espelho.registrar('simulado', q);
+      const d = aog.parseDiagnostico(q);
+      if (d && d.crcOk && d.etiqueta === 'AP01') ultimoDiagnostico = { ...d, quando: Date.now() };
       const p = aog.parseFromAutoSteer(q);
       if (p) { ultimoPgn253 = p; contadores.pgn253++; }
       transmitir({ t: 'quadro', via: 'serial', hex: q.toString('hex').toUpperCase(), decodificado: p });
@@ -298,8 +338,19 @@ setInterval(() => {
   //    No espelho os dois precisam correr, entao o simulado tambem avanca.
   if (!naPlaca || espelho.rodando) manda('T ' + decorrido);
 
-  // 2. o operador no volante (so quando o piloto nao esta comandando)
-  if (!estadoFirmware.autosteerLigado) {
+  // 2. o operador no volante.
+  //
+  // Isto rodava so com o piloto DESLIGADO, e essa guarda tornava impossivel
+  // reproduzir um override: override E girar o volante com o piloto engatado.
+  // O operador nao pede licenca ao modulo — ele pega o volante e vira. Sem
+  // isso o cenario "mao no volante" da suite nunca foi um override de verdade:
+  // ele so mudava uma leitura de corrente, e passava porque a planta antiga
+  // (CPD 100) era lenta o bastante para o PWM ficar alto o tempo todo.
+  //
+  // Com o piloto engatado o operador nao vence sozinho: o motor puxa de volta.
+  // Quem decide o resultado e a disputa entre os dois, e e justamente essa
+  // disputa que levanta a corrente e dispara o desengate.
+  {
     const taxa = 32 * (decorrido / 1000);   // graus por segundo no volante
     if (estercandoEsq) motor.girarManual(-taxa);
     if (estercandoDir) motor.girarManual(+taxa);
@@ -316,6 +367,41 @@ setInterval(() => {
   motor.passo(decorrido);
   trator.anguloRodas = motor.anguloRodasGraus;
   trator.passo(decorrido);
+
+  // 3b. o calibrador olha o mundo pelo GPS, como faria no trator.
+  //
+  // Recebe POSICAO com ruido de RTK, nao o angulo real — se recebesse o angulo
+  // nao estaria medindo nada, so devolvendo o que ja sabemos. O ruido entra aqui
+  // e nao no trator porque o trator anda pela fisica exata; quem erra e o
+  // receptor, e o erro dele e o que o metodo tem que aguentar.
+  contaGps += decorrido;
+  if (contaGps >= 100) {                 // 10 Hz, como o AOG recebe
+    contaGps = 0;
+    // As contagens tem que ser as QUE O MODULO USA, nao as cruas do motor.
+    // O firmware acumula o delta do encoder com sentido -1; alimentar o cru
+    // fazia o calibrador acusar "motor ao contrario" numa montagem correta,
+    // porque ele via o acumulador crescer ao contrario do angulo. Com o
+    // acumulador do modulo, "invertido" passa a querer dizer o que interessa:
+    // a conta que o modulo faz cresce para o lado errado.
+    //
+    // A fonte preferida e o quadro de diagnostico AP01, porque ele funciona
+    // IGUAL na placa com firmware de producao — que e onde isto vai rodar no
+    // trator. O estado do processo so existe no modo simulado, e fica como
+    // reserva para quando a resposta do diagnostico atrasar.
+    const doDiagnostico = ultimoDiagnostico
+      && (agora - ultimoDiagnostico.quando) < 1500
+      ? ultimoDiagnostico.encoderAcumulado : null;
+    const contagens = doDiagnostico != null ? doDiagnostico : estadoFirmware.encoderAcumulado;
+    if (contagens != null) {
+      calibrador.observarPosicao({
+        t: agora,
+        x: trator.x + gaussiana() * ruidoGpsM,
+        y: trator.y + gaussiana() * ruidoGpsM,
+        velocidadeKmh: trator.velocidade,
+        contagens,
+      });
+    }
+  }
 
   // 4. o motor manda heartbeat.
   //
@@ -336,6 +422,9 @@ setInterval(() => {
         manda('C ' + hb.id + ' ' + hb.hex);
       }
     };
+    // A fila modela um transporte de latencia FIXA. Ela e esvaziada quando a
+    // latencia muda (ver o comando 'atrasoMotor'), entao aqui basta entregar o
+    // que venceu.
     if (atrasoMotorMs > 0) {
       filaHeartbeat.push({ quando: agora + atrasoMotorMs, entrega });
       while (filaHeartbeat.length && filaHeartbeat[0].quando <= agora) filaHeartbeat.shift().entrega();
@@ -354,6 +443,23 @@ setInterval(() => {
     else manda('S ' + quadro.toString('hex').toUpperCase());
   }
 
+  // 5b. pergunta o estado interno ao modulo, 2x por segundo.
+  //
+  // O PGN 253 leva angulo, chaves e UM byte. Tudo o mais — encoder acumulado,
+  // saltos, limites, CPD e Ackerman vigentes, flash — so sai por aqui. Na placa
+  // com firmware de producao era exatamente isso que o painel nao tinha, e
+  // mostrava tracinho.
+  //
+  // NAO perguntar durante o espelho: la o roteiro e quem fala, e um quadro a
+  // mais no fio bagunca a comparacao entre os dois firmwares.
+  if (!espelho.rodando && agora >= proximoDiagnostico) {
+    proximoDiagnostico = agora + 500;
+    marcaDiagnostico = (marcaDiagnostico + 1) & 0xFF;
+    const q = aog.servico(aog.OPS_SERVICO.LER, { marca: marcaDiagnostico });
+    if (naPlaca) placa.enviar(q);
+    else manda('S ' + q.toString('hex').toUpperCase());
+  }
+
   // a placa esta viva? (so avisa uma vez, quando o silencio comeca)
   if (naPlaca && !placaMuda && Date.now() - ultimoPgnDaPlaca > 3000) {
     placaMuda = true;
@@ -368,9 +474,21 @@ setInterval(() => {
 const naPlacaAgora = () => modo === 'placa';
 
 function quadroDaTela() {
+  const cal = calibrador.resultado();
   return {
     t: 'tela',
     firmware: estadoFirmware,
+    // O que o GPS diz do esterçamento, independente do encoder. E a unica
+    // leitura da tela que nao vem do modulo: serve justamente para conferir o
+    // modulo.
+    // O que o modulo respondeu sobre si mesmo (PGN 239 AP01). Envelhece: se
+    // parar de responder, a tela precisa saber que o numero e velho.
+    diagnostico: ultimoDiagnostico && (Date.now() - ultimoDiagnostico.quando < 3000)
+      ? ultimoDiagnostico : null,
+    calibragem: cal.pronto ? {
+      ...cal,
+      laudo: calibrador.laudo(ajustesAog.contagensPorGrau, estadoFirmware.centro),
+    } : cal,
     motor: {
       anguloRodasGraus: motor.anguloRodasGraus,
       posicaoMotor: motor.posicaoMotor,
@@ -378,6 +496,7 @@ function quadroDaTela() {
       habilitado: motor.habilitado,
       corrente: motor.correnteAtual(),
       escorregamento: motor.escorregamento,
+      folgaGraus: motor.folgaGraus,
       contagensPorGrauReal: motor.contagensPorGrauReal,
       maoNoVolante: motor.maoNoVolante,
       travado: motor.travado,
@@ -452,6 +571,28 @@ wss.on('connection', (ws) => {
   });
 });
 
+// O AgIO manda os ajustes do perfil do trator assim que acha o modulo. O
+// simulador nao fazia isso: so mandava PGN 252 quando alguem mexia num controle
+// da tela. Resultado — o firmware rodava com os padroes DELE (CPD 100, Kp 40,
+// PWM alto 162) enquanto o painel exibia os valores do servidor, e ninguem via
+// a diferenca. Toda medida de sintonia feita antes disto media outro ganho que
+// nao o mostrado. Um atraso curto porque o modulo precisa terminar o setup().
+function mandarAjustesQuandoSubir() {
+  setTimeout(() => { mandarAjustes(); mandarConfig(); }, 300);
+}
+
+// Configuracao do trator (PGN 251). O AgIO manda os dois quadros, 252 e 251, e
+// o simulador so mandava o 252 — entao limiar de corrente, velocidade minima e
+// os bits de configuracao nunca foram exercitados aqui. set0 = 56 e o padrao de
+// fabrica do AgOpenGPS e o que os perfis do trator mandam.
+let configAog = { set0: 56, maxPulse: 0, minSpeedKmh: 0, set1: 0 };
+
+function mandarConfig() {
+  const quadro = aog.steerConfig(configAog);
+  if (modo === 'placa') placa.enviar(quadro);
+  else manda('S ' + quadro.toString('hex').toUpperCase());
+}
+
 function mandarAjustes() {
   const quadro = aog.steerSettings(ajustesAog);
   if (modo === 'placa') placa.enviar(quadro);
@@ -477,6 +618,47 @@ function aplicarComando(c) {
     case 'reverseOn':      isReverseOn = !!c.valor; break;
     case 'steerInReverse': isSteerInReverse = !!c.valor; break;
     case 'ajustes':        Object.assign(ajustesAog, c.valor); mandarAjustes(); break;
+    case 'config':         Object.assign(configAog, c.valor); mandarConfig(); break;
+    // Aplica no AOG o que o GPS mediu. E ACAO DO OPERADOR de proposito: o
+    // calibrador mede sozinho o tempo todo, mas mexer no ajuste com o trator
+    // andando muda o comportamento do piloto, e isso ninguem faz sem mandar.
+    case 'aplicarCalibragem': {
+      const r = calibrador.resultado();
+      if (!r.pronto) {
+        transmitir({ t: 'calibragem', ok: false, motivo: r.motivo });
+        break;
+      }
+      // Motor ao contrario NAO se conserta com numero. O CPD do AOG e sem
+      // sinal, entao aplicar a medida aqui esconderia o defeito fisico atras de
+      // um ajuste que parece certo — e o trator continuaria fugindo da linha.
+      if (r.invertido) {
+        transmitir({ t: 'calibragem', ok: false,
+                     motivo: 'motor montado ao contrario: isso se conserta na montagem '
+                           + 'ou no sentido do firmware, nao no CPD' });
+        break;
+      }
+      const cpdNovo = Math.max(5, Math.min(255, Math.round(r.cpd)));
+      // O angulo do firmware e (acumulado - centro + offset)/cpd. Para o zero
+      // cair onde o GPS diz que as rodas estao retas, o offset precisa valer a
+      // diferenca entre o centro em uso e o centro medido.
+      const offsetNovo = Math.round((estadoFirmware.centro || 0) - r.centro);
+      const antes = { cpd: ajustesAog.contagensPorGrau, offset: ajustesAog.offsetDirecao };
+      ajustesAog.contagensPorGrau = cpdNovo;
+      ajustesAog.offsetDirecao = Math.max(-32768, Math.min(32767, offsetNovo));
+      if (r.ackerman != null && r.ackerman >= 50 && r.ackerman <= 200) {
+        ajustesAog.ackerman = r.ackerman;
+      }
+      mandarAjustes();
+      transmitir({ t: 'calibragem', ok: true, antes,
+                   agora: { cpd: cpdNovo, offset: ajustesAog.offsetDirecao,
+                            ackerman: ajustesAog.ackerman },
+                   laudo: calibrador.laudo(antes.cpd, estadoFirmware.centro) });
+      break;
+    }
+
+    case 'reiniciarCalibragem': calibrador.reiniciar(); break;
+    case 'ruidoGps': ruidoGpsM = Number(c.valor); break;
+
     case 'wasZero': {
       const atual = (estadoFirmware.anguloAtualX100 || 0) / 100;
       ajustesAog.offsetDirecao += Math.round(ajustesAog.contagensPorGrau * -atual);
@@ -489,6 +671,7 @@ function aplicarComando(c) {
     case 'motorTravado':     motor.travado = !!c.valor; break;
     case 'motorRespondendo': motorRespondendo = !!c.valor; break;
     case 'escorregamento':   motor.escorregamento = Number(c.valor); break;
+    case 'folga':            motor.folgaGraus = Math.max(0, Number(c.valor)); break;
     case 'cpdReal':          motor.contagensPorGrauReal = Number(c.valor); break;
     case 'correnteMao':      motor.correnteMao = Number(c.valor); break;
     case 'batente':          motor.batenteGraus = Number(c.valor); break;
@@ -496,7 +679,24 @@ function aplicarComando(c) {
     case 'sentidoMontagem':  motor.sentidoMontagem = Number(c.valor); break;
     case 'pularEncoder':     motor.posicaoMotor += Number(c.valor); break;
     case 'velMotor':         motor.voltasPorSegundoMax = Number(c.valor); break;
-    case 'atrasoMotor':      atrasoMotorMs = Math.max(0, Number(c.valor)); break;
+    // Trocar a latencia e trocar de experimento, entao o que estava em voo e
+    // descartado. Sem isto, baixar o atraso (75 -> 0, que e o que a matriz de
+    // Kp faz ao trocar de linha) deixava ~4 snapshots orfaos na fila: o
+    // firmware recebia, logo depois de um heartbeat de 75 ms atras, um
+    // fresquinho — 75 ms de movimento num passo so. Girando o volante a 32
+    // graus/s com CPD 19 sao 45 contagens, acima do teto de 40 do detector de
+    // salto, e o modulo perdia a REFERENCIA, que so volta com reboot. A matriz
+    // inteira de 08/09 saiu contaminada assim.
+    //
+    // Esvaziar abre um vao de heartbeat do tamanho do atraso antigo. Isso e
+    // seguro: o firmware dimensiona o teto de salto pelo tempo decorrido
+    // (limite = 4 + 1800*dt/1000), entao um vao de 75 ms permite 139 contagens,
+    // bem acima das 45 que o vao carrega. No maximo ele desengata por
+    // "sem heartbeat do motor", que e recuperavel — perder a referencia nao e.
+    case 'atrasoMotor':
+      atrasoMotorMs = Math.max(0, Number(c.valor));
+      filaHeartbeat.length = 0;
+      break;
 
     // ---- placa de verdade ----
     case 'listarPortas':
@@ -539,15 +739,36 @@ function aplicarComando(c) {
       aogLigado = true; motorRespondendo = true;
       isReverseOn = true; isSteerInReverse = false;
       ajustesAog = { ganhoP: 40, pwmAlto: 180, pwmBaixo: 30, pwmMinimo: 25,
-                     contagensPorGrau: 100, offsetDirecao: 0, ackerman: 100 };
+                     contagensPorGrau: 19, offsetDirecao: 0, ackerman: 100 };
+      configAog = { set0: 56, maxPulse: 0, minSpeedKmh: 0, set1: 0 };
       contadores = { pgn253: 0, canCmd: 0 };
       ultimoPgn253 = null;
+      filaHeartbeat.length = 0;   // nada em voo atravessa um reinicio
+      // O calibrador tambem recomeca. Ele nao fazia isso, e as medidas de arco
+      // de um roteiro entravam na conta do seguinte — com outro CPD, outra
+      // velocidade de motor, outra folga. O ajuste da reta ficava misturando
+      // duas maquinas diferentes e devolvia um CPD que nao era de nenhuma das
+      // duas (medido: 29 onde a verdade era 19, com R2 caindo para 0,50).
+      calibrador.reiniciar();
       manda('R');
+      mandarAjustesQuandoSubir();
+      break;
+
+    // Acao desconhecida nao pode sumir calada.
+    //
+    // Um teste mandava 'reiniciar' onde o nome e 'reset'; o comando caia aqui
+    // sem erro nenhum e o teste seguia como se tivesse reiniciado — passando por
+    // motivo errado por semanas. Comando que nao existe agora aparece no log e
+    // volta para quem mandou.
+    default:
+      console.error('[servidor] acao desconhecida: ' + JSON.stringify(c.acao));
+      transmitir({ t: 'acaoDesconhecida', acao: c.acao });
       break;
   }
 }
 
 iniciarFirmware();
+mandarAjustesQuandoSubir();
 servidor.listen(PORTA, () => {
   console.log('\n  Simulador de traducao do autosteer');
   console.log('  firmware: ' + path.relative(process.cwd(), EXE));

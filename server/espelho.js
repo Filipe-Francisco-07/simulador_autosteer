@@ -163,6 +163,10 @@ function comparar(nome, s, p) {
 // ---------------------------------------------------------------------------
 function roteiro() {
   const cfg = (o) => aog.steerSettings({ ganhoP: 40, pwmAlto: 180, pwmBaixo: 30,
+    // CPD 100 de proposito aqui, e nao o 19 real da maquina: neste arquivo o
+    // CPD e a VARIAVEL SOB TESTE (ha cenarios de CPD 0, 1, 2, 255), e o que se
+    // compara e se os dois firmwares reagem igual, nao se o angulo bate com a
+    // roda. Trocar o valor de fundo aqui so tornaria os cenarios ambiguos.
     pwmMinimo: 25, contagensPorGrau: 100, offsetDirecao: 0, ackerman: 100, ...o });
   const cmd = (o) => aog.steerData({ velocidadeKmh: 5, engatar: true, anguloAlvoGraus: 0, xte: 0, ...o });
 
@@ -207,6 +211,10 @@ function roteiro() {
 // ---------------------------------------------------------------------------
 function roteiroEstresse() {
   const cfg = (o) => aog.steerSettings({ ganhoP: 40, pwmAlto: 180, pwmBaixo: 30,
+    // CPD 100 de proposito aqui, e nao o 19 real da maquina: neste arquivo o
+    // CPD e a VARIAVEL SOB TESTE (ha cenarios de CPD 0, 1, 2, 255), e o que se
+    // compara e se os dois firmwares reagem igual, nao se o angulo bate com a
+    // roda. Trocar o valor de fundo aqui so tornaria os cenarios ambiguos.
     pwmMinimo: 25, contagensPorGrau: 100, offsetDirecao: 0, ackerman: 100, ...o });
   const cmd = (o) => aog.steerData({ velocidadeKmh: 5, engatar: true, anguloAlvoGraus: 0, xte: 0, ...o });
 

@@ -14,7 +14,7 @@ const { Piloto } = require('./piloto.js');
 async function cenario(p, { reverseOn, steerInReverse }) {
   await p.zerar();
   if (p.naPlaca) await p.usarPlaca();
-  p.envia('ajustes', { ganhoP: 20, contagensPorGrau: 100, pwmMinimo: 25, pwmAlto: 180 });
+  p.envia('ajustes', { ganhoP: 20, contagensPorGrau: 19, pwmMinimo: 25, pwmAlto: 180 });
   p.envia('reverseOn', reverseOn);
   p.envia('steerInReverse', steerInReverse);
   await p.espera(400);

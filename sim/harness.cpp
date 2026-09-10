@@ -24,6 +24,8 @@
 #include <string>
 #include <iostream>
 #include <deque>
+#include <map>
+#include <string>
 #include <vector>
 
 // ---- as globais que os stubs declararam como extern ----
@@ -38,6 +40,18 @@ std::string          g_serialLog;
 std::vector<twai_message_t> g_canTx;
 std::deque<twai_message_t>  g_canRx;
 SerialStub Serial;
+
+// flash falsa (NVS) e motivo do boot — o firmware passou a ler os dois em 07/09
+std::map<std::string, std::vector<uint8_t>> g_flash;
+std::map<std::string, float> g_flashFloat;
+bool g_flashFalha = false;
+unsigned g_flashGravacoes = 0;
+esp_reset_reason_t g_motivoBoot = ESP_RST_POWERON;
+
+// falhas de barramento que o harness liga sob demanda
+bool     g_canFalhaInstalar = false;
+bool     g_canFalhaTx = false;
+uint32_t g_canAlertas = 0;
 
 // ---- o firmware de verdade ----
 #include FIRMWARE_MAIN
@@ -73,6 +87,30 @@ static void drenarSaidas() {
 
 // Espelha o estado interno do firmware. Sao as variaveis static do main.cpp —
 // visiveis porque incluimos o .cpp.
+// O codigo 8 do firmware nao quer dizer so "recusei": ele tambem marca o
+// caminho normal de "o ajuste mudou, entao desengatei por seguranca". Chamar
+// isso de "recusada" mandava caçar um defeito que nao existe — foi o que
+// aconteceu aqui em 07/09 ao ver o codigo aparecer depois de zerar as rodas.
+static const char* nomeDaFalha(FalhaDirecao f) {
+    switch (f) {
+        case FalhaDirecao::Nenhuma:       return "nenhuma";
+        case FalhaDirecao::Referencia:    return "sem zero de partida";
+        case FalhaDirecao::Encoder:       return "salto de encoder";
+        case FalhaDirecao::CanAusente:    return "sem heartbeat do motor";
+        case FalhaDirecao::AogAusente:    return "sem PGN do AOG";
+        case FalhaDirecao::Sobrecarga:    return "sobrecorrente";
+        case FalhaDirecao::Motor:         return "motor em erro";
+        case FalhaDirecao::TransporteCan: return "transporte CAN";
+        case FalhaDirecao::Configuracao:  return "ajuste trocado ou recusado";
+        case FalhaDirecao::ForaDoCurso:   return "fora do curso";
+        case FalhaDirecao::Velocidade:    return "abaixo da velocidade minima";
+    }
+    return "?";
+}
+
+// Espelha o estado interno do firmware. Desde 07/09 quase tudo vive dentro do
+// objeto `controle`; os nomes de campo antigos foram mantidos aqui de proposito
+// para nao quebrar o servidor e os testes que ja liam este JSON.
 static void publicarEstado() {
     printf("{\"t\":\"state\""
            ",\"ms\":%u"
@@ -92,24 +130,55 @@ static void publicarEstado() {
            ",\"ganhoP\":%u,\"pwmAlto\":%u,\"pwmMinimo\":%u"
            ",\"contagensPorGrau\":%u,\"offsetDirecao\":%d"
            ",\"tUltimoPgn\":%u,\"tUltimoHb\":%u"
+           ",\"referencia\":%s"
+           ",\"reconhecido\":%s"
+           ",\"centro\":%d"
+           ",\"falha\":%u"
+           ",\"falhaNome\":\"%s\""
+           ",\"limiteEsquerdo\":%u,\"limiteDireito\":%u"
+           ",\"limitesValidos\":%s"
+           ",\"saltos\":%u"
+           ",\"erroMotor\":%u"
+           ",\"velocidadeMinima\":%u"
+           ",\"limiar\":%u"
+           ",\"canPronto\":%s"
+           ",\"flashErro\":%s"
+           ",\"referenciaPendente\":%s"
            "}\n",
            (unsigned)g_millis,
-           (int)anguloAtualX100,
-           (int)ordem.anguloAlvoX100,
-           (int)pwmSaida,
-           autosteerLigado ? "true" : "false",
-           travaSeguranca ? "true" : "false",
-           keyaVisto ? "true" : "false",
-           motorDesabilitou ? "true" : "false",
-           (int)encoder.acumulado,
-           encoder.iniciado ? "true" : "false",
-           (double)correnteMedia,
-           (unsigned)ciclosSobrecarga,
-           (unsigned)(ordem.status & 0x01),
-           (unsigned)ordem.velocidadeKmhX10,
-           (unsigned)ajustes.ganhoP, (unsigned)ajustes.pwmAlto, (unsigned)ajustes.pwmMinimo,
-           (unsigned)ajustes.contagensPorGrau, (int)ajustes.offsetDirecao,
-           (unsigned)tUltimoPgn, (unsigned)tUltimoHb);
+           (int)controle.angulo,
+           (int)controle.alvo,
+           (int)controle.pwm,
+           controle.ligado ? "true" : "false",
+           controle.trava ? "true" : "false",
+           controle.viuHb ? "true" : "false",
+           (controle.erroMotor & 1) ? "true" : "false",
+           (int)controle.encoder.acumulado,
+           controle.encoder.iniciado ? "true" : "false",
+           (double)controle.corrente,
+           (unsigned)controle.ciclosMotor,
+           (unsigned)(controle.pedido ? 1 : 0),
+           (unsigned)controle.velocidade,
+           (unsigned)controle.ajustes.ganhoP,
+           (unsigned)controle.ajustes.pwmAlto,
+           (unsigned)controle.ajustes.pwmMinimo,
+           (unsigned)controle.ajustes.contagensPorGrau,
+           (int)controle.ajustes.offsetDirecao,
+           (unsigned)controle.ultimoPgn, (unsigned)controle.ultimoHb,
+           controle.referencia ? "true" : "false",
+           controle.reconhecido ? "true" : "false",
+           (int)controle.centro,
+           (unsigned)controle.falha,
+           nomeDaFalha(controle.falha),
+           (unsigned)controle.limiteEsquerdo, (unsigned)controle.limiteDireito,
+           controle.limitesValidos() ? "true" : "false",
+           (unsigned)controle.saltos,
+           (unsigned)controle.erroMotor,
+           (unsigned)controle.velocidadeMinima,
+           (unsigned)controle.limiar,
+           canPronto ? "true" : "false",
+           flashErro ? "true" : "false",
+           referenciaPendente ? "true" : "false");
 }
 
 // Reinicia tudo ao estado de boot — inclusive o que o firmware guarda entre
@@ -119,21 +188,22 @@ static void reiniciar() {
     g_serialRx.clear(); g_serialTx.clear();
     g_canTx.clear(); g_canRx.clear();
 
-    ordem   = {0, 0, 0, 0, 0, 0};
-    ajustes = {40, 180, 30, 25, 100, 0, 0};
-    autosteerLigado = false; keyaVisto = false; travaSeguranca = false;
-    motorDesabilitou = false;
-    tUltimoPgn = tUltimoHb = tUltimoEnvio = tUltimoCmdCan = 0;
-    hb = {0, 0, 0, 0};
-    correnteMedia = 0.0f; ciclosSobrecarga = 0;
-    encoder = {0, 0, false};
-    encoderCentro = 0; anguloAtualX100 = 0; pwmSaida = 0;
+    // Estado do firmware volta ao que seria logo apos energizar a placa.
+    controle = ControleDirecao{};
+    referenciaPendente = true;
+    canPronto = false; flashPendente = false; flashErro = false;
+    ultimaGravacao = ultimoComando = ultimoStatus = 0;
+    ultimoPwm = 0;
+    memset(registroSalvo, 0, sizeof registroSalvo);
+    serPos = 0; ultimoByte = 0;
+    alertasCanAcumulados = 0;
+    settingsRejeitados = false; configRejeitada = false;
 
-    // A ancora do offset precisa rearmar: sem isto o "R" nao repete o boot de
-    // verdade — o primeiro PGN 252 depois do reinicio nao ancoraria mais nada.
-    offsetAncorado = false;
-    contaPgn254 = 0; ultimoStatus254 = 0; cpdEmUso = 100;
-    serPos = 0; serFaltam = 0;
+    // Flash falsa: por padrao uma placa nova, sem nada gravado. Quem quiser
+    // simular placa que ja rodou no campo carrega g_flash antes de chamar "R".
+    g_flashFalha = false;
+    g_flashGravacoes = 0;
+    g_canFalhaInstalar = false; g_canFalhaTx = false; g_canAlertas = 0;
 
     setup();
     drenarSaidas();

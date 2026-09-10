@@ -16,7 +16,7 @@ const aog = require('./aog.js');
 
 const EXE = path.join(__dirname, '..', 'sim', 'firmware_sim.exe');
 const AJUSTES_PADRAO = { ganhoP: 40, pwmAlto: 180, pwmBaixo: 30, pwmMinimo: 25,
-                          contagensPorGrau: 100, offsetDirecao: 0, ackerman: 100 };
+                          contagensPorGrau: 19, offsetDirecao: 0, ackerman: 100 };
 
 class Driver {
   constructor() {
@@ -62,6 +62,23 @@ class Driver {
     await this.espera(1);
   }
 
+  // Leva o modulo do boot ate "pronto para engatar", como o AgIO faz.
+  //
+  // O firmware de 07/09 nao nasce mais pronto: ele precisa de um ZERO DE
+  // PARTIDA, e para centrar exige piloto DESLIGADO, velocidade ZERO, heartbeat
+  // fresco e PGN recente ao mesmo tempo. Depois disso a trava de seguranca
+  // ainda pede 250 ms de piloto desligado para soltar.
+  //
+  // Este roteiro mandava `engatar: true` com velocidade 5 desde o primeiro
+  // tique, entao o modulo nunca centrava e os 6 cenarios falhavam todos com
+  // `engatou=false` — sem defeito nenhum embaixo.
+  async partir(ajustes = AJUSTES_PADRAO) {
+    this.ajustar(ajustes);
+    const parado = { velocidadeKmh: 0, engatar: false, anguloAlvoGraus: 0, xte: 0 };
+    for (let i = 0; i < 40; i++) await this.tique({ comando: parado });   // 800 ms
+    return this.estado.referencia === true && this.estado.travaSeguranca === false;
+  }
+
   fim() { this.fw.stdin.end(); }
 }
 
@@ -73,12 +90,12 @@ function registrar(nome, ok, detalhe) {
 
 // ---------------------------------------------------------------------------
 // A. Corte de cabo do AOG com o piloto engatado — o cao de guarda de PGN e
-//    `if (autosteerLigado && (agora - tUltimoPgn > 1000)) autosteerLigado = false;`
+//    hoje AOG_MAX_MS = 500 ms (era 1000 ate 06/09).
 // ---------------------------------------------------------------------------
 async function testeCorteCabo() {
   const d = new Driver();
   await d.espera(300);
-  d.ajustar(AJUSTES_PADRAO);
+  await d.partir();
   const comando = { velocidadeKmh: 5, engatar: true, anguloAlvoGraus: 10, xte: 0 };
 
   for (let i = 0; i < 50; i++) await d.tique({ comando });          // 1 s pra engatar e assentar
@@ -94,19 +111,21 @@ async function testeCorteCabo() {
   d.fim();
 
   const atraso = tDesengatou !== null ? tDesengatou - tCorte : null;
-  const ok = engatouAntes && atraso !== null && atraso >= 950 && atraso <= 1200 && pwmZerouTambem;
+  // A janela virou AOG_MAX_MS = 500 ms no firmware de 07/09 (era 1000).
+  const ok = engatouAntes && atraso !== null && atraso >= 450 && atraso <= 700 && pwmZerouTambem;
   registrar('corte do cabo AOG (piloto engatado)', ok,
-    `engatou=${engatouAntes} desengatou em ${atraso}ms apos o corte (esperado ~1000ms) pwm=0:${pwmZerouTambem}`);
+    `engatou=${engatouAntes} desengatou em ${atraso}ms apos o corte (esperado ~500ms) pwm=0:${pwmZerouTambem}`);
 }
 
 // ---------------------------------------------------------------------------
 // B. Corte do CAN (motor some) com o piloto engatado — segundo cao de guarda:
-//    `if (autosteerLigado && keyaVisto && (agora - tUltimoHb > 1000)) ...`
+//    hoje `if (viuHb && !hbFresco(agora)) parar(CanAusente)`, com
+//    HB_MAX_MS = 200 ms. Era 1000 ms ate 06/09.
 // ---------------------------------------------------------------------------
 async function testeCorteCan() {
   const d = new Driver();
   await d.espera(300);
-  d.ajustar(AJUSTES_PADRAO);
+  await d.partir();
   const comando = { velocidadeKmh: 5, engatar: true, anguloAlvoGraus: 10, xte: 0 };
 
   for (let i = 0; i < 50; i++) await d.tique({ comando });
@@ -122,20 +141,21 @@ async function testeCorteCan() {
   d.fim();
 
   const atraso = tDesengatou !== null ? tDesengatou - tCorte : null;
-  const ok = engatouAntes && keyaVistoAntes && atraso !== null && atraso >= 950 && atraso <= 1200;
+  // HB_MAX_MS = 200 ms no firmware de 07/09 (era 1000).
+  const ok = engatouAntes && keyaVistoAntes && atraso !== null && atraso >= 180 && atraso <= 400;
   registrar('corte do CAN (motor some, piloto engatado)', ok,
-    `engatou=${engatouAntes} keyaVisto=${keyaVistoAntes} desengatou em ${atraso}ms apos o corte (esperado ~1000ms)`);
+    `engatou=${engatouAntes} keyaVisto=${keyaVistoAntes} desengatou em ${atraso}ms apos o corte (esperado ~200ms)`);
 }
 
 // ---------------------------------------------------------------------------
 // C. Mao no volante: precisa (1) desengatar sozinho, (2) FICAR solto enquanto
-//    o AOG insiste em pedir engate — a trava so cai na borda de descida — e
-//    (3) reengatar quando o operador soltar e pedir de novo.
+//    o AOG insiste em pedir engate — a trava so cai com o pedido solto — e
+//    (3) reengatar quando o operador soltar por 250 ms e pedir de novo.
 // ---------------------------------------------------------------------------
 async function testeMaoNoVolante() {
   const d = new Driver();
   await d.espera(300);
-  d.ajustar(AJUSTES_PADRAO);
+  await d.partir();
   const comando = { velocidadeKmh: 5, engatar: true, anguloAlvoGraus: 15, xte: 0 };
 
   for (let i = 0; i < 30; i++) await d.tique({ comando });
@@ -163,8 +183,13 @@ async function testeMaoNoVolante() {
     if (d.estado.autosteerLigado === true) { reengatouSemBorda = true; break; }
   }
 
-  // agora sim: operador solta o pedido (borda de descida) e pede de novo
-  await d.tique({ comando: { ...comando, engatar: false } });
+  // agora sim: o operador solta o pedido e pede de novo.
+  //
+  // Ate 06/09 bastava UM ciclo com engatar:false — a trava caia na borda de
+  // descida, na hora. Desde 07/09 sao 250 ms de pedido solto E o modulo
+  // saudavel. Este teste soltava por 20 ms e concluia que nao reengatava.
+  const soltando = { ...comando, engatar: false };
+  for (let i = 0; i < 20; i++) await d.tique({ comando: soltando });   // 400 ms
   let reengatouComBorda = false;
   for (let i = 0; i < 30; i++) {
     await d.tique({ comando });
@@ -183,27 +208,54 @@ async function testeMaoNoVolante() {
 }
 
 // ---------------------------------------------------------------------------
-// D. Pedir angulo alem do batente mecanico — a roda trava, a corrente sobe
-//    igual a mao no volante, e a mesma protecao tem que atuar.
+// D. Pedir angulo alem do envelope — o CONTRATO MUDOU em 07/09.
+//
+// Antes: a roda ia ate o ferro, a corrente subia igual a mao no volante e a
+// protecao de sobrecorrente desengatava. Era protecao por acidente.
+//
+// Agora o firmware tem um envelope proprio, derivado do batente medido
+// (BATENTE_CONTAGENS = 700) e do CPD vigente. Chegando nele, ele SEGURA o
+// angulo e CONTINUA ENGATADO — o PWM daquele sentido vai a zero. Quem desengata
+// passou a ser so a sobrecorrente de verdade, ou seja forcar contra o ferro.
+//
+// Entao o que se exige aqui inverteu: pedir 80 graus NAO pode levar a roda ao
+// batente fisico, e NAO pode desengatar. Se a roda encostar no ferro, o
+// envelope falhou.
 // ---------------------------------------------------------------------------
 async function testeAlemDoBatente() {
   const d = new Driver();
   await d.espera(300);
-  d.ajustar(AJUSTES_PADRAO);
-  const comando = { velocidadeKmh: 5, engatar: true, anguloAlvoGraus: 80, xte: 0 }; // batente e 40 graus
+  await d.partir();
+  const comando = { velocidadeKmh: 5, engatar: true, anguloAlvoGraus: 80, xte: 0 }; // batente fisico: 40 graus
 
-  let desengatouSozinho = false;
-  let chegouNoBatente = false;
+  let encostouNoFerro = false;
+  let desengatou = false, motivo = null, quandoMs = null, anguloAoCair = null;
+  // So vale como desengate depois de ter engatado. Sem esta guarda os primeiros
+  // ciclos — em que o pedido acabou de chegar e o modulo ainda nao ligou — eram
+  // contados como queda, e o cenario acusava um defeito que nao existe.
+  let jaEngatou = false;
   for (let i = 0; i < 250; i++) {                                  // 5s
     await d.tique({ comando });
-    if (d.motor.noBatente) chegouNoBatente = true;
-    if (chegouNoBatente && d.estado.autosteerLigado === false) { desengatouSozinho = true; break; }
+    if (d.motor.noBatente) encostouNoFerro = true;
+    if (d.estado.autosteerLigado === true) jaEngatou = true;
+    if (jaEngatou && d.estado.autosteerLigado === false && !desengatou) {
+      desengatou = true;
+      motivo = d.estado.falhaNome;
+      quandoMs = d.estado.ms;
+      anguloAoCair = d.estado.anguloAtualX100 / 100;
+    }
   }
+  const anguloFinal = d.motor.anguloRodasGraus;
+  const limiteGraus = (d.estado.limiteDireito || 0) / 100;
   d.fim();
 
-  const ok = chegouNoBatente && desengatouSozinho;
-  registrar('pedir alem do batente: corrente sobe e o piloto solta sozinho', ok,
-    `chegou no batente=${chegouNoBatente} desengatou sozinho=${desengatouSozinho}`);
+  // Parou dentro do envelope, com folga para o ferro, e sem largar o piloto.
+  const parouNoEnvelope = Math.abs(anguloFinal) <= limiteGraus + 1;
+  const ok = jaEngatou && !encostouNoFerro && !desengatou && parouNoEnvelope;
+  registrar('pedir alem do envelope: segura o angulo e NAO encosta no ferro', ok,
+    `parou em ${anguloFinal.toFixed(1)}° (envelope ${limiteGraus.toFixed(1)}°, ferro 40°)`
+    + ` · encostou no ferro=${encostouNoFerro}`
+    + (desengatou ? ` · DESENGATOU em ${quandoMs}ms por "${motivo}" com o estimado em ${anguloAoCair.toFixed(1)}°` : ' · seguiu engatado'));
 }
 
 // ---------------------------------------------------------------------------
@@ -213,13 +265,15 @@ async function testeAlemDoBatente() {
 async function testeEstouroEncoder() {
   const d = new Driver();
   await d.espera(300);
-  d.ajustar(AJUSTES_PADRAO);
-  // ancora o offset (primeiro 252 ja foi mandado acima) e deixa o motor perto
-  // do estouro do contador de 16 bits do proprio Keya. Esterçar para +30 graus
-  // com o SENTIDO do firmware faz o contador do encoder ANDAR PARA TRAS
-  // (e o comando CAN que sai negativo pra fazer a roda ir a favor) — por isso
-  // comeca perto do zero, nao perto de 0xFFFF: e por ali que ele estoura.
+  // O motor comeca perto do estouro do contador de 16 bits do proprio Keya.
+  // Esterçar para +30 graus com o SENTIDO do firmware faz o contador ANDAR PARA
+  // TRAS, entao comecar perto do zero e o caminho para o estouro.
+  //
+  // ISTO PRECISA VIR ANTES DE partir(). Estava depois, e ai o salto de 0 para
+  // 200 contagens de uma vez era lido pelo firmware como encoder perdendo
+  // conta: ele derrubava a REFERENCIA e o cenario nem chegava a engatar.
   d.motor.posicaoMotor = 200;
+  await d.partir();
   const comando = { velocidadeKmh: 5, engatar: true, anguloAlvoGraus: 30, xte: 0 };
 
   let maiorSaltoX100 = 0;
@@ -260,7 +314,7 @@ async function testeEstouroEncoder() {
 async function testeMontadoAoContrario() {
   const d = new Driver();
   await d.espera(300);
-  d.ajustar(AJUSTES_PADRAO);
+  await d.partir();
   d.motor.sentidoMontagem = 1; // firmware assume SENTIDO=-1; aqui invertemos so o motor
 
   const comando = { velocidadeKmh: 5, engatar: true, anguloAlvoGraus: 15, xte: 0 };
