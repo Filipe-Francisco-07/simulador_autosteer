@@ -40,7 +40,7 @@ function injetar(hex) {
 }
 
 const espera = ms => new Promise(r=>setTimeout(r,ms));
-const cfg = aog.steerSettings({ganhoP:40,pwmAlto:180,pwmBaixo:30,pwmMinimo:25,contagensPorGrau:100,offsetDirecao:0,ackerman:100});
+const cfg = aog.steerSettings({ganhoP:40,pwmAlto:180,pwmBaixo:30,pwmMinimo:25,contagensPorGrau:19,offsetDirecao:0,ackerman:100});
 const cmd = aog.steerData({velocidadeKmh:5,engatar:true,anguloAlvoGraus:20,xte:0});
 
 (async () => {

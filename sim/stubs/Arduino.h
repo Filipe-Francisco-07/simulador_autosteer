@@ -63,3 +63,15 @@ typedef enum {
 #define ESP_OK 0
 typedef int esp_err_t;
 inline uint32_t pdMS_TO_TICKS(uint32_t ms) { return ms; }
+
+// ---- motivo do ultimo boot ----
+// O firmware imprime isto no banner desde 07/09 para separar defeito de software
+// (PANIC, WDT) de problema eletrico (BROWNOUT). No PC nao ha silicio para
+// consultar, entao o harness escolhe o valor; o padrao honesto e POWERON.
+typedef enum {
+    ESP_RST_UNKNOWN = 0, ESP_RST_POWERON, ESP_RST_EXT, ESP_RST_SW, ESP_RST_PANIC,
+    ESP_RST_INT_WDT, ESP_RST_TASK_WDT, ESP_RST_WDT, ESP_RST_DEEPSLEEP,
+    ESP_RST_BROWNOUT, ESP_RST_SDIO
+} esp_reset_reason_t;
+extern esp_reset_reason_t g_motivoBoot;
+inline esp_reset_reason_t esp_reset_reason() { return g_motivoBoot; }

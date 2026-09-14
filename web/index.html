@@ -315,6 +315,25 @@ button.primario.ligado{background:var(--ativo);border-color:var(--ativo)}
     </div>
   </section>
 
+  <section class="modulo">
+    <h2>Calibragem pelo GPS <span class="lado">o que a roda faz de verdade</span></h2>
+    <div class="corpo">
+      <div class="leituras" style="margin-bottom:9px">
+        <div class="leitura"><div class="r">CPD medido</div><div class="n" id="cCpd">—</div></div>
+        <div class="leitura"><div class="r">Centro medido</div><div class="n" id="cCentro">—</div></div>
+        <div class="leitura"><div class="r">Confiança</div><div class="n" id="cR2">—</div></div>
+      </div>
+      <div class="registro" id="cLaudo"></div>
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <button id="btnAplicarCal">Aplicar no AgOpenGPS</button>
+        <button id="btnZerarCal">Recomeçar medida</button>
+      </div>
+      <p class="dica">Sai do GPS, não do encoder — por isso serve para conferir o
+        encoder. Precisa do trator andando e esterçando para os dois lados:
+        vira, <b>segura alguns segundos</b>, vira mais.</p>
+    </div>
+  </section>
+
   <section class="modulo quente">
     <h2>Motor Keya <span class="lado">você é o hardware</span></h2>
     <div class="corpo">
@@ -340,8 +359,15 @@ button.primario.ligado{background:var(--ativo);border-color:var(--ativo)}
         <input type="range" id="escorrega" min="0" max="90" step="1" value="0">
       </div>
       <div class="campo">
-        <label>Contagens por grau reais <span class="v" id="vCpdReal">100</span></label>
-        <input type="range" id="cpdReal" min="40" max="200" step="1" value="100">
+        <!-- min 5 porque o valor real da maquina e ~19 (batente medido no JD
+             5078). O minimo era 40, entao o controle nem alcancava a realidade:
+             resto da epoca em que o simulador andava com CPD 100. -->
+        <label>Contagens por grau reais <span class="v" id="vCpdReal">19</span></label>
+        <input type="range" id="cpdReal" min="5" max="200" step="1" value="19">
+      </div>
+      <div class="campo">
+        <label>Folga do orbitrol <span class="v" id="vFolga">0,0°</span></label>
+        <input type="range" id="folga" min="0" max="60" step="1" value="0">
       </div>
       <div class="campo">
         <label>Velocidade do motor <span class="v" id="vVelMotor">4,0 v/s</span></label>

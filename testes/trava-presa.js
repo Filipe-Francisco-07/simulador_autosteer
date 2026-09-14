@@ -29,7 +29,7 @@ const { Piloto } = require('./piloto.js');
     console.log('SIMULADO\n');
   }
 
-  p.envia('ajustes', { ganhoP: 20, contagensPorGrau: 100, pwmMinimo: 25, pwmAlto: 180 });
+  p.envia('ajustes', { ganhoP: 20, contagensPorGrau: 19, pwmMinimo: 25, pwmAlto: 180 });
   await p.prepararLinha();
 
   // 1. engata normalmente

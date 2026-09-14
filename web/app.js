@@ -58,6 +58,8 @@ $('btnA').onclick = () => enviar('marcarA');
 $('btnB').onclick = () => enviar('marcarB');
 $('btnRastro').onclick = () => enviar('limparRastro');
 $('btnZero').onclick = () => enviar('wasZero');
+$('btnAplicarCal').onclick = () => enviar('aplicarCalibragem');
+$('btnZerarCal').onclick = () => { enviar('reiniciarCalibragem'); anotar('calibragem: recomecando a medida'); };
 $('btnReset').onclick = () => {
   enviar('reset');
   $('eventos').innerHTML = '';
@@ -74,6 +76,9 @@ const deslizante = (id, acao, formatar, rotulo, transformar) => {
   mostrar();
 };
 deslizante('escorrega', 'escorregamento', (v) => v + '%', 'vEscorrega', (v) => v / 100);
+// Folga em decimos de grau: o interessante esta entre 0 e 6 graus, e um passo
+// de 1 grau seria grosso demais para achar onde ela comeca a incomodar.
+deslizante('folga', 'folga', (v) => (v / 10).toFixed(1).replace('.', ',') + '°', 'vFolga', (v) => v / 10);
 deslizante('cpdReal', 'cpdReal', (v) => v, 'vCpdReal');
 deslizante('batente', 'batente', (v) => v + '°', 'vBatente');
 deslizante('velMotor', 'velMotor', (v) => Number(v).toFixed(1).replace('.', ',') + ' v/s', 'vVelMotor');
@@ -321,6 +326,13 @@ ws.onmessage = (ev) => {
     if (m.estado === 'desligada') anotar('placa desconectada');
     return;
   }
+  // resposta do "Aplicar no AgOpenGPS"
+  if (m.t === 'calibragem') {
+    anotar(m.ok
+      ? `calibragem aplicada: CPD ${m.antes.cpd} -> ${m.agora.cpd}, offset ${m.agora.offset}`
+      : 'calibragem nao aplicada: ' + m.motivo);
+    return;
+  }
   if (m.t === 'limparTextoPlaca') { $('textoPlaca').innerHTML = ''; return; }
   if (m.t === 'textoPlaca') {
     const el = $('textoPlaca');
@@ -350,6 +362,8 @@ ws.onmessage = (ev) => {
     $('steerInReverse').checked = m.isSteerInReverse;
     $('escorrega').value = Math.round(m.motor.escorregamento * 100);
     $('vEscorrega').textContent = Math.round(m.motor.escorregamento * 100) + '%';
+    $('folga').value = Math.round((m.motor.folgaGraus || 0) * 10);
+    $('vFolga').textContent = (m.motor.folgaGraus || 0).toFixed(1).replace('.', ',') + '°';
     $('cpdReal').value = m.motor.contagensPorGrauReal;
     $('vCpdReal').textContent = m.motor.contagensPorGrauReal;
     $('batente').value = m.motor.batenteGraus;
@@ -400,10 +414,39 @@ ws.onmessage = (ev) => {
   const naPlaca = f.deQuem === 'placa';
   const bancada = naPlaca && m.placa && m.placa.bancada;
   const semLeitura = '<small>—</small>';
+  // O quadro de diagnostico (PGN 239 AP01) chega igual na placa e no simulado,
+  // entao o que antes era tracinho no modo placa agora tem numero de verdade.
+  const dg = m.diagnostico;
   $('mPwm').textContent = f.pwmSaida ?? 0;
   $('mCorrente').innerHTML = naPlaca ? semLeitura : nn(f.correnteMedia || 0) + '<small>A</small>';
-  $('mEncoder').innerHTML = naPlaca ? semLeitura : String(Math.round(f.encoderAcumulado || 0));
+  $('mEncoder').innerHTML = dg ? String(dg.encoderAcumulado)
+    : (naPlaca ? semLeitura : String(Math.round(f.encoderAcumulado || 0)));
   $('mAlvo').innerHTML = nn(g.alvo || 0) + '<small>°</small>';
+
+  // Calibragem pelo GPS. Enquanto nao houver passeio suficiente ele diz o que
+  // falta em vez de mostrar numero — numero inventado aqui manda o operador
+  // configurar errado com confianca.
+  const c = m.calibragem;
+  if (c && c.pronto) {
+    $('cCpd').innerHTML = nn(c.cpd, 1) + (c.invertido ? ' <small>invertido!</small>' : '');
+    $('cCentro').textContent = Math.round(c.centro);
+    $('cR2').innerHTML = 'R²&nbsp;' + c.r2.toFixed(2);
+    const laudo = $('cLaudo');
+    if (laudo.dataset.n !== String(c.n)) {
+      laudo.dataset.n = String(c.n);
+      laudo.innerHTML = '';
+      for (const l of (c.laudo || [])) {
+        const d = document.createElement('div');
+        d.textContent = l;
+        laudo.appendChild(d);
+      }
+    }
+  } else {
+    $('cCpd').innerHTML = semLeitura;
+    $('cCentro').innerHTML = semLeitura;
+    $('cR2').innerHTML = semLeitura;
+    $('cLaudo').textContent = c ? ('faltando: ' + c.motivo) : '';
+  }
 
   $('seloPos').textContent =
     `${(t.percorrido || 0).toFixed(0)} m percorridos · rumo ${((t.rumo || 0) * 180 / Math.PI).toFixed(0)}°`;

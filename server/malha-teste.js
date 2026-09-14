@@ -51,7 +51,7 @@ async function rodar(segundos, comando) {
 (async () => {
   await espera(300);
   manda('S ' + aog.steerSettings({ ganhoP: 40, pwmAlto: 180, pwmBaixo: 30, pwmMinimo: 25,
-                                   contagensPorGrau: 100, offsetDirecao: 0, ackerman: 100 })
+                                   contagensPorGrau: 19, offsetDirecao: 0, ackerman: 100 })
     .toString('hex').toUpperCase());
 
   const casos = [
@@ -60,19 +60,39 @@ async function rodar(segundos, comando) {
     { nome: 'alvo 0 (voltar ao centro)', alvo: 0, seg: 6 },
   ];
 
+  // O modulo precisa do zero de partida antes de qualquer coisa: piloto
+  // desligado, velocidade ZERO, heartbeat fresco e PGN recente ao mesmo tempo.
+  // Este roteiro comecava mandando engatar:true com velocidade 5, entao ele
+  // nunca centrava e os alvos falhavam com engatado=false.
+  await rodar(1, { velocidadeKmh: 0, engatar: false, anguloAlvoGraus: 0, xte: 0 });
+  if (!estado.referencia || estado.travaSeguranca) {
+    console.log('FALHA arranque: ref=' + estado.referencia + ' trava=' + estado.travaSeguranca
+      + ' falha=' + estado.falhaNome + ' — sem isto nenhum alvo abaixo vale');
+    fw.stdin.end();
+    process.exit(1);
+  }
+
+  let ruins = 0;
   for (const c of casos) {
     await rodar(c.seg, { velocidadeKmh: 5, engatar: true, anguloAlvoGraus: c.alvo, xte: 0 });
     const estimado = (estado.anguloAtualX100 || 0) / 100;
     const real = motor.anguloRodasGraus;
     const erro = Math.abs(estimado - c.alvo);
+    // Piloto solto NAO e "chegou no alvo". Com alvo 0 tudo comeca em zero,
+    // entao o caso do centro passava mesmo com o modulo desengatado — passar
+    // por acidente e o jeito de um teste parar de avisar.
+    const ok = erro < 1 && estado.autosteerLigado === true;
+    if (!ok) ruins++;
     console.log(
-      (erro < 1 ? 'OK   ' : 'FALHA') +
+      (ok ? 'OK   ' : 'FALHA') +
       ` ${c.nome.padEnd(26)} estimado ${estimado.toFixed(2).padStart(7)}°` +
       ` · roda ${real.toFixed(2).padStart(7)}°` +
       ` · pwm ${String(estado.pwmSaida).padStart(4)}` +
       ` · engatado ${estado.autosteerLigado}`);
   }
+  console.log('');
+  console.log('  ' + (casos.length - ruins) + ' de ' + casos.length + ' alvos');
 
   fw.stdin.end();
-  process.exit(0);
+  process.exit(ruins ? 1 : 0);
 })();
