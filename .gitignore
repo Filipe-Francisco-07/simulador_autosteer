@@ -10,3 +10,6 @@ sim/*.obj
 firmware_bancada/.pio/
 
 *.log
+
+# estado local da maquina, nao codigo: cada monitor tem os perfis dele
+config-tradutor/perfis.json
