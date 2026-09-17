@@ -1,0 +1,172 @@
+<!-- Aba de configuracao do tradutor — prototipo do chamado 15. -->
+<meta charset="utf-8">
+<title>Configuração do tradutor</title>
+<style>
+  :root {
+    --fundo: #0d1117; --painel: #161b22; --borda: #30363d;
+    --texto: #e6edf3; --fraco: #8b949e;
+    --verde: #2ea043; --vermelho: #d73a49; --ambar: #d29922; --azul: #1f6feb;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--fundo); color: var(--texto);
+         font: 15px/1.5 system-ui, -apple-system, Segoe UI, sans-serif; }
+  header { padding: 14px 22px; border-bottom: 1px solid var(--borda);
+           display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  h1 { font-size: 17px; margin: 0; font-weight: 600; }
+  .grade { display: grid; grid-template-columns: 340px 1fr; gap: 18px; padding: 18px 22px; }
+  @media (max-width: 900px) { .grade { grid-template-columns: 1fr; } }
+  .painel { background: var(--painel); border: 1px solid var(--borda);
+            border-radius: 10px; padding: 16px; }
+  .painel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em;
+               color: var(--fraco); margin: 0 0 12px; font-weight: 600; }
+  label { display: block; font-size: 13px; color: var(--fraco); margin: 10px 0 4px; }
+  input, select { width: 100%; padding: 8px 10px; background: #0d1117;
+                  border: 1px solid var(--borda); border-radius: 6px;
+                  color: var(--texto); font: inherit; }
+  button { padding: 9px 14px; border-radius: 6px; border: 1px solid var(--borda);
+           background: #21262d; color: var(--texto); font: inherit; cursor: pointer; }
+  button:hover { border-color: #8b949e; }
+  button.primario { background: var(--verde); border-color: var(--verde); font-weight: 600; }
+  button.perigo { background: var(--vermelho); border-color: var(--vermelho); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .linha { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .par { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  td { padding: 6px 0; border-bottom: 1px solid #21262d; }
+  td:last-child { text-align: right; font-weight: 600; }
+  .rotulo { color: var(--fraco); }
+  .selo { padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .ok { background: rgba(46,160,67,.18); color: #56d364; }
+  .mal { background: rgba(215,58,73,.18); color: #f85149; }
+  .atencao { background: rgba(210,153,34,.18); color: #e3b341; }
+  .dica { font-size: 12.5px; color: var(--fraco); margin-top: 10px; line-height: 1.5; }
+  .dif { background: rgba(210,153,34,.10); border: 1px solid rgba(210,153,34,.35);
+         border-radius: 8px; padding: 10px 12px; margin-top: 10px; font-size: 13.5px; }
+  .dif b { color: #e3b341; }
+  #portao { position: fixed; inset: 0; background: rgba(6,8,12,.93);
+            display: none; align-items: center; justify-content: center; z-index: 50; }
+  #portao.ligado { display: flex; }
+  .cartao { max-width: 560px; text-align: center; padding: 34px; }
+  .cartao h2 { font-size: 22px; margin: 0 0 10px; color: var(--texto);
+               text-transform: none; letter-spacing: 0; }
+  .cartao p { color: var(--fraco); margin: 0 0 20px; }
+  #registro { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px;
+              color: var(--fraco); max-height: 170px; overflow: auto; }
+  #registro div { padding: 2px 0; border-bottom: 1px solid #21262d; }
+</style>
+
+<header>
+  <h1>Configuração do tradutor</h1>
+  <span id="selo" class="selo atencao">iniciando</span>
+  <span id="origem" style="color:var(--fraco);font-size:13px"></span>
+  <span style="flex:1"></span>
+  <select id="porta" style="width:auto;min-width:190px"></select>
+  <button id="btnListar">Procurar</button>
+  <button id="btnConectar" class="primario">Conectar</button>
+  <button id="btnDesconectar">Desconectar</button>
+</header>
+
+<div class="grade">
+  <div>
+    <div class="painel">
+      <h2>Trator</h2>
+      <select id="listaPerfis"></select>
+      <div class="linha" style="margin-top:10px">
+        <button id="btnNovo">Novo</button>
+        <button id="btnDoModulo">Criar do módulo</button>
+        <button id="btnApagar" class="perigo">Apagar</button>
+      </div>
+      <p class="dica">Cada trator tem o seu perfil. O mesmo tradutor trocado de
+        máquina só precisa que você escolha o perfil certo e grave.</p>
+    </div>
+
+    <div class="painel" style="margin-top:18px">
+      <h2>O que o módulo diz</h2>
+      <table id="leitura"><tr><td class="rotulo">—</td><td>—</td></tr></table>
+      <div class="linha" style="margin-top:12px">
+        <button id="btnLer">Ler agora</button>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="painel">
+      <h2>Perfil</h2>
+      <label>Nome do trator</label>
+      <input id="f_nome" placeholder="JD 5078">
+
+      <div class="par">
+        <div>
+          <label>Contagens por grau (pda)</label>
+          <input id="f_cpd" type="number" min="5" max="255" step="1">
+        </div>
+        <div>
+          <label>Ackerman (%)</label>
+          <input id="f_ackerman" type="number" min="50" max="200" step="1">
+        </div>
+      </div>
+
+      <div class="par">
+        <div>
+          <label>Corrente de desligamento (A)</label>
+          <input id="f_corrente" type="number" min="1" max="100" step="1">
+        </div>
+        <div>
+          <label>Velocidade mínima (km/h)</label>
+          <input id="f_velmin" type="number" min="0" max="25" step="0.1">
+        </div>
+      </div>
+
+      <div class="par">
+        <div>
+          <label>Esterçamento máx. esquerda (°)</label>
+          <input id="f_esq" type="number" min="5" max="60" step="0.5">
+        </div>
+        <div>
+          <label>Esterçamento máx. direita (°)</label>
+          <input id="f_dir" type="number" min="5" max="60" step="0.5">
+        </div>
+      </div>
+
+      <div class="par">
+        <div>
+          <label>Ganho (Kp)</label>
+          <input id="f_kp" type="number" min="1" max="255" step="1">
+        </div>
+        <div>
+          <label>PWM alto</label>
+          <input id="f_pwmalto" type="number" min="1" max="255" step="1">
+        </div>
+      </div>
+
+      <div class="linha" style="margin-top:16px">
+        <button id="btnSalvar">Salvar perfil</button>
+        <button id="btnGravar" class="primario">Gravar no módulo</button>
+      </div>
+
+      <div id="divergencias"></div>
+
+      <p class="dica">
+        <b>Esterçamento máximo</b> é o envelope do próprio módulo, derivado do
+        batente. Ele segura o ângulo e <b>continua engatado</b>; quem desengata é
+        a sobrecorrente. Não confunda com o Max Steer Angle do AgOpenGPS, que
+        satura o alvo antes de mandar.
+      </p>
+    </div>
+
+    <div class="painel" style="margin-top:18px">
+      <h2>Registro</h2>
+      <div id="registro"></div>
+    </div>
+  </div>
+</div>
+
+<div id="portao">
+  <div class="cartao">
+    <h2 id="portaoTitulo">Configure o tradutor antes de abrir o AgOpenGPS</h2>
+    <p id="portaoTexto"></p>
+    <button id="btnIgnorar">Continuar mesmo assim</button>
+  </div>
+</div>
+
+<script src="app.js"></script>

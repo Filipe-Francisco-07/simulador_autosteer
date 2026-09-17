@@ -173,6 +173,16 @@ button.primario.ligado{background:var(--ativo);border-color:var(--ativo)}
       <span class="modo-nota" id="modoNota">a malha fecha inteira, com o motor Keya de mentira</span>
     </div>
     <div class="modo-acoes">
+      <!-- A aba de configuracao do tradutor (chamado 15) e uma ferramenta de
+           PRODUTO, nao do simulador: ela roda sozinha e fala com a mesma porta
+           serial, ou com este mesmo firmware compilado para PC. O link fica
+           aqui so por conveniencia de quem esta testando.
+           Suba com: node config-tradutor/servidor.js -->
+      <a id="linkConfig" href="http://localhost:3100" target="_blank"
+         style="font-family:var(--cond);font-size:11px;font-weight:700;letter-spacing:.1em;
+                text-transform:uppercase;text-decoration:none;color:var(--ativo);
+                border:1px solid var(--ativo);border-radius:5px;padding:5px 9px"
+         title="Aba de configuracao do tradutor (porta 3100)">Config. do tradutor</a>
       <select id="portas" aria-label="Porta da placa"><option value="">procurando portas…</option></select>
       <select id="baud" aria-label="Velocidade da serial">
         <option value="38400" selected>38400 baud</option>
