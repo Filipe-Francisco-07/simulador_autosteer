@@ -60,7 +60,7 @@ function desenhar(m) {
   const [classe, rotulo] = SELO[m.situacao.estado] || ['atencao', m.situacao.estado];
   $('selo').className = 'selo ' + classe;
   $('selo').textContent = rotulo;
-  $('origem').textContent = m.origem ? '· ' + m.origem : '';
+  $('origem').textContent = m.origem ? '(' + m.origem + ')' : '';
   $('btnConectar').disabled = m.ligado;
   $('btnDesconectar').disabled = !m.ligado;
   $('btnLer').disabled = !m.ligado;
@@ -92,7 +92,7 @@ function desenhar(m) {
   const t = $('leitura');
   if (!m.leitura) {
     t.innerHTML = '<tr><td class="rotulo">' +
-      (m.erro ? m.erro : 'sem leitura') + '</td><td>—</td></tr>';
+      (m.erro ? m.erro : 'sem leitura') + '</td><td>-</td></tr>';
   } else {
     const l = m.leitura;
     const par = (r, v) => `<tr><td class="rotulo">${r}</td><td>${v}</td></tr>`;
@@ -105,7 +105,7 @@ function desenhar(m) {
       par('Trava', l.trava ? 'armada' : 'solta') +
       par('Falha', l.falhaNome) +
       par('Encoder', l.encoderAcumulado) +
-      par('Flash', l.flashErro ? 'ERRO' : (l.flashPendente ? 'gravando…' : 'ok'));
+      par('Flash', l.flashErro ? 'ERRO' : (l.flashPendente ? 'gravando...' : 'ok'));
   }
 
   // divergencias
@@ -140,7 +140,7 @@ ws.onmessage = (ev) => {
     for (const p of m.portas) {
       const o = document.createElement('option');
       o.value = p.caminho;
-      o.textContent = p.caminho + (p.fabricante ? ' — ' + p.fabricante : '');
+      o.textContent = p.caminho + (p.fabricante ? ' (' + p.fabricante + ')' : '');
       s.appendChild(o);
     }
     anotar(m.portas.length + ' porta(s) encontrada(s)');
@@ -150,7 +150,7 @@ ws.onmessage = (ev) => {
   if (m.t === 'gravado') {
     for (const p of m.passos) anotar('gravou: ' + p);
     anotar('flash assentou em ' + m.esperouFlashMs + ' ms' +
-           (m.flashErro ? ' — ERRO DE FLASH' : ''));
+           (m.flashErro ? ', ERRO DE FLASH' : ''));
     if (m.recusouLimites) anotar('ATENÇÃO: o módulo recusou o esterçamento máximo');
     // O portao so cai quando a releitura confirmar; nao adianta confiar no envio.
     ignorouPortao = false;

@@ -8,7 +8,7 @@
 // O AgIO abre e SEGURA a porta do tradutor (`spSteerModule`), e porta serial no
 // Windows e exclusiva: dois programas nao abrem a mesma. Alem disso o AgIO
 // roteia por numero de PGN e a tabela dele (UDP.designer.cs) nao inclui o 240,
-// que e o do nosso protocolo de servico — entao nem passando por ele daria.
+// que e o do nosso protocolo de servico, entao nem passando por ele daria.
 //
 // Isso define o lugar desta ferramenta no produto: ela roda ANTES do AgIO,
 // enquanto a porta esta livre. Ver README.md.
@@ -68,7 +68,7 @@ class Tradutor {
   }
 
   // Firmware real compilado para PC. Serve para desenvolver e para demonstrar
-  // sem o ESP32 na mesa — e o MESMO codigo que vai gravado na placa.
+  // sem o ESP32 na mesa, e o MESMO codigo que vai gravado na placa.
   async abrirSimulado() {
     await this.fechar();
     const exe = path.join(__dirname, '..', 'sim', 'firmware_sim.exe');
@@ -127,7 +127,7 @@ class Tradutor {
 
   // Manda uma pergunta de servico e espera a resposta com a MESMA marca.
   // A marca existe para nao casar a resposta errada quando ha mais de uma
-  // pergunta no ar — o firmware devolve o byte que recebeu.
+  // pergunta no ar. O firmware devolve o byte que recebeu.
   _servico(op, extras = {}) {
     const marca = (this.proximaMarca = (this.proximaMarca % 250) + 1);
     const quadro = aog.servico(op, { ...extras, marca });
@@ -146,9 +146,9 @@ class Tradutor {
   // ---- escrita ----
   //
   // Cada grupo vai pelo quadro que o firmware entende:
-  //   PGN 252 — CPD, Ackerman, ganho, PWM, offset
-  //   PGN 251 — corrente de desligamento, velocidade minima, bits de config
-  //   servico op2 — esterçamento maximo (o envelope do modulo)
+  //   PGN 252: CPD, Ackerman, ganho, PWM, offset
+  //   PGN 251: corrente de desligamento, velocidade minima, bits de config
+  //   servico op2: esterçamento maximo (o envelope do modulo)
 
   async gravar(perfil) {
     const passos = [];
@@ -165,7 +165,7 @@ class Tradutor {
     passos.push('ajustes (PGN 252)');
     await this._respirar();
 
-    // O limiar de corrente so e aceito com sensor de carga marcado — sem isso o
+    // O limiar de corrente so e aceito com sensor de carga marcado. Sem isso o
     // firmware trata maxPulse como contagem de pulso e ignora. Ver o comentario
     // em main.cpp: sensorDeCarga = (set1 & 0x06).
     this._enviar(aog.steerConfig({

@@ -1,4 +1,4 @@
-// Aba de configuracao do tradutor — protótipo do chamado 15.
+// Aba de configuracao do tradutor, prototipo do chamado 15.
 //
 // Roda no monitor Windows, ANTES do AgIO, enquanto a porta serial do tradutor
 // ainda esta livre. Le a configuracao que o modulo tem hoje, compara com o
@@ -8,7 +8,7 @@
 //   1. o AgIO abre e SEGURA a porta do tradutor (spSteerModule em
 //      SerialComm.Designer.cs); porta serial no Windows e exclusiva;
 //   2. o AgIO roteia por numero de PGN e a tabela dele (UDP.designer.cs,
-//      ReceiveFromLoopBack) tem 254, 252, 251, 239, 238 e 236 — o 240, que e o
+//      ReceiveFromLoopBack) tem 254, 252, 251, 239, 238 e 236. O 240, que e o
 //      do protocolo de servico, NAO esta la.
 //
 // Entao esta ferramenta e o PORTEIRO: ela abre primeiro, garante que o modulo
@@ -29,7 +29,7 @@ const ARQUIVO_PERFIS = path.join(__dirname, 'perfis.json');
 // ---------------------------------------------------------------- perfis
 
 // Um perfil por trator. O chamado pede "configurado independente para cada
-// trator" — entao o perfil e a unidade, e o modulo e so onde ele e aplicado.
+// trator", entao o perfil e a unidade, e o modulo e so onde ele e aplicado.
 const PERFIL_PADRAO = {
   nome: 'Trator novo',
   contagensPorGrau: 19,
@@ -135,7 +135,7 @@ async function aplicarComando(c) {
           // Erro tipico: o AgIO ja esta com a porta. Vale dizer isso na tela,
           // senao o operador fica tentando de novo sem entender.
           ultimoErro = /Access denied|Acesso negado|busy/i.test(e.message)
-            ? 'a porta esta ocupada — o AgIO esta aberto? feche-o e tente de novo'
+            ? 'a porta esta ocupada, o AgIO esta aberto? feche-o e tente de novo'
             : e.message;
           transmitir(quadroDaTela());
         }

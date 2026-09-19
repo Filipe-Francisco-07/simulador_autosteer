@@ -68,8 +68,8 @@ const linha = (s) => console.log('  ' + s);
     } else {
       for (const d of dif) linha(`DIVERGIU ${d.nome}: pedi ${d.pedido}, o modulo diz ${d.obtido}`);
     }
-    linha(`CPD ${r.conferencia.contagensPorGrau} · Ackerman ${r.conferencia.ackerman} · ` +
-          `corrente ${r.conferencia.limiar} A · ` +
+    linha(`CPD ${r.conferencia.contagensPorGrau}, Ackerman ${r.conferencia.ackerman}, ` +
+          `corrente ${r.conferencia.limiar} A, ` +
           `esterço ${r.conferencia.limiteEsquerdo / 100}°/${r.conferencia.limiteDireito / 100}°`);
 
     // ---- 4. a gravacao chega na flash? ----
@@ -84,7 +84,7 @@ const linha = (s) => console.log('  ' + s);
       ultimo = await t.ler();
     }
     r.conferencia = ultimo;
-    linha(`esperei ${esperou} ms · flashPendente=${ultimo.flashPendente} · flashErro=${ultimo.flashErro}`);
+    linha(`esperei ${esperou} ms, flashPendente=${ultimo.flashPendente}, flashErro=${ultimo.flashErro}`);
     linha(ultimo.flashErro ? 'ERRO DE FLASH: o modulo nao conseguiu gravar'
           : ultimo.flashPendente ? 'AINDA PENDENTE apos 8 s'
           : 'gravado na flash')
@@ -92,7 +92,7 @@ const linha = (s) => console.log('  ' + s);
     console.log('\n===== VEREDITO =====\n');
     const ok = dif.length === 0 && !r.recusouLimites && !r.conferencia.flashErro;
     linha(ok ? 'da para configurar o tradutor por fora do AgOpenGPS: SIM'
-             : 'algo nao fechou — ver acima');
+             : 'algo nao fechou, ver acima');
     console.log('');
     await t.fechar();
     process.exit(ok ? 0 : 1);

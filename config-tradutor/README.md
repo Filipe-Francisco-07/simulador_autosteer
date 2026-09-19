@@ -49,6 +49,44 @@ A corrente de desligamento só é aceita com sensor de carga marcado (`set1` bit
 pressão, bit 2 corrente). Sem isso o firmware lê o campo como contagem de pulso
 de encoder e ignora. A ferramenta liga esse bit ao gravar.
 
+## O modulo falso, para testar a aba do AgOpenGPS
+
+`modulo-falso.js` faz o papel do ESP32 falando UDP, para exercitar a janela
+dentro do AgOpenGPS sem placa nenhuma.
+
+Ele existe por causa de um detalhe do AgIO: em `ReceiveFromLoopBack` a linha
+`SendUDPMessage(data, epModule)` vem **antes** do switch de PGN, entao tudo que
+o AgOpenGPS manda sai para a rede na porta 8888, e a resposta volta na 9999. O
+programa escuta a 8888 e responde na 9999.
+
+Imita o firmware no que a aba precisa:
+
+- manda PGN 253 a cada 100 ms, que e o que acende o modulo no AgOpenGPS
+- responde ao PGN 240 com assinatura AP01 devolvendo o PGN 239
+- guarda o que chega por PGN 252, PGN 251 e servico op2
+- segura `flashPendente` por 600 ms antes de assentar, igual a NVS de verdade
+- aplica a mesma regra do `set1 & 0x06`: sem sensor de carga marcado, o campo
+  de corrente nao vira limiar
+
+```bash
+node config-tradutor/modulo-falso.js            # responde normalmente
+node config-tradutor/modulo-falso.js --mudo     # manda 253, nunca devolve 239
+```
+
+O `--mudo` serve para ver a mensagem que a aba mostra quando o modulo esta
+ligado mas a pergunta nao chega nele. E diferente da de "sem modulo nenhum", e
+essa diferenca e o que evita o operador ir mexer no cabo quando o problema e o
+software.
+
+Depois abra o AgIO, ligue o UDP nele (icone de rede, **UDP Off** vira **UDP Is
+On**), reabra o AgIO, porque a porta 9999 so abre no arranque, e ponha a
+sub-rede na do PC com **Auto Fill New Subnet** e **Set Subnet**. Ai abra o
+AgOpenGPS e va em Wizards, Config. do tradutor.
+
+O que ele **nao** cobre: o quadro sai pelo caminho de rede, que ja existia no
+AgIO. O caminho serial, que e o do monitor de verdade com o tradutor no USB, so
+fecha com um ESP32 numa porta COM.
+
 ## Uma armadilha que vale saber
 
 O firmware **junta** as mudanças antes de escrever na NVS. Logo depois de
